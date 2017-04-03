@@ -65,7 +65,7 @@ struct Core {
             let siblingResponses = allResponses(href: transition.href, method: request.method)
             let responseCases = try siblingResponses.map { r -> [String: Any] in
                 let type: String
-                let contentTypeEscaped = r.contentType.replacingOccurrences(of: "/", with: "_")
+                let contentTypeEscaped = (r.contentType ?? "").replacingOccurrences(of: "/", with: "_")
                 let rawType = (r.dataStructure?.arrayContent ?? []).first.flatMap {$0.element}.map {SwiftTypeName.nameEscapingKeyword($0)} ?? "unknown"
                 let innerType: (local: String, global: String)?
                 switch rawType {
@@ -81,7 +81,7 @@ struct Core {
                 }
                 var context: [String: String] = [
                     "statusCode": String(r.statusCode),
-                    "contentType": r.contentType,
+                    "contentType": r.contentType ?? "",
                     "case": "http\(r.statusCode)_\(contentTypeEscaped)",
                     "type": type,
                     ]
@@ -92,7 +92,6 @@ struct Core {
             }
 
             var context: [String: Any] = [
-                "copy": transition.copy,
                 "name": requestTypeName,
                 "response": "Responses",
                 "responseCases": responseCases,
@@ -111,6 +110,9 @@ struct Core {
                     // external type (reference to type defined in Data Structures)
                     context["paramType"] = ds.element
                 }
+            }
+            if let copy = transition.copy {
+                context["copy"] = copy
             }
             try print(trTemplate.render(context))
         }
@@ -250,16 +252,15 @@ struct SwiftTypeName: Decodable {
 
 struct Transition {
     let title: String?
-    let copy: String
+    let copy: String?
     let href: String
     let httpTransactions: [HTTPTransaction]
 
     init(_ element: APIBlueprintElement, parentResource: APIBlueprintElement? = nil) throws {
-        guard let copy = (element.elements(byName: "copy")?.first?.stringContent) else { throw ConversionError.undefined }
         guard let href = element.attributes?.href ?? parentResource?.attributes?.href else { throw ConversionError.undefined }
         guard let httpTransactions = element.elements(byName: "httpTransaction") else { throw ConversionError.undefined }
         self.title = element.meta?.title
-        self.copy = copy
+        self.copy = element.elements(byName: "copy")?.first?.stringContent
         self.href = href
         self.httpTransactions = try httpTransactions.map {try HTTPTransaction($0, href: href, title: element.meta?.title)}
     }
@@ -307,17 +308,15 @@ struct HTTPTransaction {
         let headers: [String: String]?
         let dataStructure: APIBlueprintElement?
         let statusCode: Int // multiple Responses are identified by pair (statusCode, contentType) for a single Request
-        let contentType: String
+        let contentType: String?
 
         init(_ element: APIBlueprintElement) throws {
             guard let dataStructures = element.elements(byName: "dataStructure") else { throw ConversionError.unknownDataStructure }
             guard let statusCode = (element.attributes?.statusCode.flatMap {Int($0)}) else { throw ConversionError.undefined }
-            guard let headers = element.attributes?.headers else { throw ConversionError.undefined }
-            guard let contentType = headers["Content-Type"] else { throw ConversionError.undefined }
             self.dataStructure = dataStructures.first
-            self.headers = headers
+            self.headers = element.attributes?.headers
             self.statusCode = statusCode
-            self.contentType = contentType
+            self.contentType = headers?["Content-Type"]
         }
     }
 }
