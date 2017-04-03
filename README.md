@@ -25,4 +25,5 @@ SwiftBeaker converts ...
 
 - [ ] support content type other than `application/json`
 - [ ] support URITemplate style endpoint
+- [ ] support message body assets (direct JSON example as a parameter)
 
