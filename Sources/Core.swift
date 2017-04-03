@@ -273,14 +273,11 @@ struct HTTPTransaction {
     fileprivate let href: String
 
     var requestTypeName: String {
-        let raw: String?
         if let title = title, let first = title.characters.first {
-            raw = String(first).uppercased() + String(title.characters.dropFirst())
+            return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
         } else {
-            raw = nil
+            return (httpRequest.method + "_" + href).swiftIdentifierized()
         }
-        let cs = CharacterSet(charactersIn: " _/{?,}-")
-        return (raw ?? httpRequest.method + "_" + href).components(separatedBy: cs).joined(separator: "_")
     }
 
     init(_ element: APIBlueprintElement, href: String, title: String?) throws {
@@ -363,22 +360,27 @@ func swift(dataStructure ds: APIBlueprintElement, name: String? = nil) throws ->
         let optional = m.attributes?.required != true
         let optionalSuffix = optional ? "?" : ""
         return [
-            "name": content.name,
+            "name": content.name.swiftIdentifierized(),
             "type": content.type.name + optionalSuffix,
             "optional": optional,
             "doc": doc,
             "decoder": (content.type.isArray ? "<||" : "<|") + optionalSuffix]}
 
     let localName = name.components(separatedBy: ".").last ?? name
-    return (local: try localDSTemplate.render(["name": localName,
+    return (local: try localDSTemplate.render(["name": localName.swiftIdentifierized(),
                                                "vars": vars]),
-            global: try globalDSTemplate.render(["name": localName,
-                                                 "fqn": name,
+            global: try globalDSTemplate.render(["name": localName.swiftIdentifierized(),
+                                                 "fqn": name.components(separatedBy: ".").map {$0.swiftIdentifierized()}.joined(separator: "."),
                                                  "vars": vars]))
 }
 
 extension String {
     func indented(by level: Int) -> String {
         return components(separatedBy: "\n").map {Array(repeating: " ", count: level).joined() + $0}.joined(separator: "\n")
+    }
+
+    func swiftIdentifierized() -> String {
+        let cs = CharacterSet(charactersIn: " _/{?,}-")
+        return components(separatedBy: cs).joined(separator: "_")
     }
 }
