@@ -3,5 +3,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "SwiftBeaker"
+    name: "SwiftBeaker",
+    dependencies: [.Package(url: "https://github.com/ishkawa/APIKit", majorVersion: 3),
+                   .Package(url: "https://github.com/banjun/JetToTheFuture", majorVersion: 0),
+                   .Package(url: "https://github.com/ikesyo/Himotoki", majorVersion: 3),
+                   .Package(url: "https://github.com/kylef/Stencil", majorVersion: 0),
+                   .Package(url: "https://github.com/kylef/Commander", majorVersion: 0)
+    ]
 )

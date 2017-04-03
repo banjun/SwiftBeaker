@@ -1,0 +1,60 @@
+{
+  "autoPin": true,
+  "pins": [
+    {
+      "package": "APIKit",
+      "reason": null,
+      "repositoryURL": "https://github.com/ishkawa/APIKit",
+      "version": "3.1.2"
+    },
+    {
+      "package": "BrightFutures",
+      "reason": null,
+      "repositoryURL": "https://github.com/Thomvis/BrightFutures",
+      "version": "5.2.0"
+    },
+    {
+      "package": "Commander",
+      "reason": null,
+      "repositoryURL": "https://github.com/kylef/Commander",
+      "version": "0.6.1"
+    },
+    {
+      "package": "Himotoki",
+      "reason": null,
+      "repositoryURL": "https://github.com/ikesyo/Himotoki",
+      "version": "3.0.1"
+    },
+    {
+      "package": "JetToTheFuture",
+      "reason": null,
+      "repositoryURL": "https://github.com/banjun/JetToTheFuture",
+      "version": "0.3.0"
+    },
+    {
+      "package": "PathKit",
+      "reason": null,
+      "repositoryURL": "https://github.com/kylef/PathKit.git",
+      "version": "0.8.0"
+    },
+    {
+      "package": "Result",
+      "reason": null,
+      "repositoryURL": "https://github.com/antitypical/Result.git",
+      "version": "3.2.1"
+    },
+    {
+      "package": "Spectre",
+      "reason": null,
+      "repositoryURL": "https://github.com/kylef/Spectre.git",
+      "version": "0.7.2"
+    },
+    {
+      "package": "Stencil",
+      "reason": null,
+      "repositoryURL": "https://github.com/kylef/Stencil",
+      "version": "0.8.0"
+    }
+  ],
+  "version": 1
+}
