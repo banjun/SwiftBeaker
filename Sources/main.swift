@@ -1,7 +1,8 @@
 import Commander
+import Foundation
 
 let main = command { (file: String) in
-    print("Hello, Happy World!!")
+    try Core.main(file: (file as NSString).expandingTildeInPath)
 }
 
 main.run()
