@@ -124,7 +124,8 @@ struct Core {
             globalExtensionCode += s.global
             print(s.local)
         }
-        
+
+        print(preamble)
         print(globalExtensionCode)
     }
 }
