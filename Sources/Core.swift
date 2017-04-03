@@ -49,7 +49,7 @@ struct Core {
                                                    "    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Response {",
                                                    "        let contentType = urlResponse.allHeaderFields[\"Content-Type\"] as? String",
                                                    "        switch (urlResponse.statusCode, contentType) {",
-                                                   "{% for r in responseCases %}        case ({{ r.statusCode }}, \"{{ r.contentType }}\"?):",
+                                                   "{% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):",
                                                    "            return try .{{ r.case }}({% if r.innerType %}Responses.{% endif %}{{ r.type }}.decodeValue(object))",
                                                    "{% endfor %}        default:",
                                                    "            throw ResponseError.undefinedResponse(urlResponse.statusCode, contentType)",
@@ -66,7 +66,7 @@ struct Core {
             let responseCases = try siblingResponses.map { r -> [String: Any] in
                 let type: String
                 let contentTypeEscaped = (r.contentType ?? "").replacingOccurrences(of: "/", with: "_")
-                let rawType = (r.dataStructure?.arrayContent ?? []).first.flatMap {$0.element}.map {SwiftTypeName.nameEscapingKeyword($0)} ?? "unknown"
+                let rawType = (r.dataStructure?.arrayContent ?? []).first.flatMap {$0.element}.map {SwiftTypeName.nameEscapingKeyword($0)} ?? "Void"
                 let innerType: (local: String, global: String)?
                 switch rawType {
                 case "object":
@@ -81,7 +81,7 @@ struct Core {
                 }
                 var context: [String: String] = [
                     "statusCode": String(r.statusCode),
-                    "contentType": r.contentType ?? "",
+                    "contentType": r.contentType.map {"\"\($0)\"?"} ?? "_",
                     "case": "http\(r.statusCode)_\(contentTypeEscaped)",
                     "type": type,
                     ]
