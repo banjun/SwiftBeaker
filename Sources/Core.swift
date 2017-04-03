@@ -273,11 +273,14 @@ struct HTTPTransaction {
     fileprivate let href: String
 
     var requestTypeName: String {
+        let raw: String?
         if let title = title, let first = title.characters.first {
-            return String(first).uppercased() + String(title.characters.dropFirst())
+            raw = String(first).uppercased() + String(title.characters.dropFirst())
+        } else {
+            raw = nil
         }
         let cs = CharacterSet(charactersIn: " _/{?,}-")
-        return (httpRequest.method + "_" + href).components(separatedBy: cs).joined(separator: "_")
+        return (raw ?? httpRequest.method + "_" + href).components(separatedBy: cs).joined(separator: "_")
     }
 
     init(_ element: APIBlueprintElement, href: String, title: String?) throws {
