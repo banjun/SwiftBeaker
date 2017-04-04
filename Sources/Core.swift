@@ -230,6 +230,7 @@ struct SwiftTypeName: Decodable {
 
     static let typeMap = ["string": "String",
                           "number": "Int",
+                          "enum": "Int",
                           "boolean": "Bool"]
     static let keywords = ["Error"]
     static func nameEscapingKeyword(_ name: String) -> String {
