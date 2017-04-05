@@ -21,9 +21,3 @@ SwiftBeaker converts ...
 * each Responses bound to a Request into a `enum Responses` whose cases identified by a pair of status code and content type
 * each Data Structures (named and anonymous) into a [Himotoki](https://github.com/ikesyo/Himotoki)`.Decodable` struct
 
-## TODO
-
-- [ ] support content type other than `application/json`
-- [ ] support URITemplate style endpoint
-- [ ] support message body assets (direct JSON example as a parameter)
-
