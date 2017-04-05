@@ -26,14 +26,13 @@ struct Core {
                                                    "    let baseURL: URL",
                                                    "    var method: HTTPMethod {return {{ method }}}",
                                                    "{% for v in pathVars %}{% if forloop.first %}",
+                                                   "    let path = \"\" // see intercept(urlRequest:)",
                                                    "    static let pathTemplate: URITemplate = \"{{ path }}\"",
                                                    "    var pathVars: PathVars",
                                                    "    struct PathVars {",
                                                    "{% endif %}        /// {{ v.doc }}",
-                                                   "        var {{ v.name }}: {{ v.type }}{% if forloop.first %}",
-                                                   "    }",
-                                                   "    var path: String {return {{ name }}.pathTemplate.expand([:])}", // NOTE: APIKit does not support URITemplate format other than `path + query`
-                                                   "    var queryParameters: [String: Any]? {return pathVars.context}",
+                                                   "        var {{ v.name }}: {{ v.type }}",
+                                                   "{% if forloop.last %}    }",
                                                    "{% endif %}{% empty %}",
                                                    "    var path: String {return \"{{ path }}\"}{% endfor %}",
                                                    "    var dataParser: DataParser {return RawDataParser()}",
@@ -45,7 +44,14 @@ struct Core {
                                                    "{% for r in responseCases %}        case {{ r.case }}({{ r.type }}){% if r.innerType %}",
                                                    "{{ r.innerType }}{% endif %}",
                                                    "{% endfor %}    }",
-                                                   "",
+                                                   "{% if pathVars %}",
+                                                   "    // reconstruct URL to use URITemplate.expand. NOTE: APIKit does not support URITemplate format other than `path + query`",
+                                                   "    func intercept(urlRequest: URLRequest) throws -> URLRequest {",
+                                                   "        var req = urlRequest",
+                                                   "        req.url = URL(string: baseURL.absoluteString + {{ name }}.pathTemplate.expand(pathVars.context))!",
+                                                   "        return req",
+                                                   "    }",
+                                                   "{% endif %}",
                                                    "    // conver object (Data) to expected type",
                                                    "    func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {",
                                                    "        let contentType = urlResponse.allHeaderFields[\"Content-Type\"] as? String",
@@ -116,10 +122,11 @@ struct Core {
                 "path": transition.href
             ]
             if let hrefVariables = transition.hrefVariables {
-                let pathVars: [[String: String]] = hrefVariables.members.map {
+                let pathVars: [[String: Any]] = hrefVariables.members.map {
                     ["name": $0.swiftName,
                      "type": $0.swiftType,
-                     "doc": $0.swiftDoc]
+                     "doc": $0.swiftDoc,
+                     "optional": $0.attributes.required != true]
                 }
                 context["pathVars"] = pathVars
                 globalExtensionCode += try globalPathVarsTemplate.render([
