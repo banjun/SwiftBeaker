@@ -25,7 +25,17 @@ struct Core {
                                                    "    typealias Response = {{ response }}",
                                                    "    let baseURL: URL",
                                                    "    var method: HTTPMethod {return {{ method }}}",
-                                                   "    var path: String {return \"{{ path }}\"}",
+                                                   "{% for v in pathVars %}{% if forloop.first %}",
+                                                   "    static let pathTemplate: URITemplate = \"{{ path }}\"",
+                                                   "    var pathVars: PathVars",
+                                                   "    struct PathVars {",
+                                                   "{% endif %}        /// {{ v.doc }}",
+                                                   "        var {{ v.name }}: {{ v.type }}{% if forloop.first %}",
+                                                   "    }",
+                                                   "    var path: String {return {{ name }}.pathTemplate.expand([:])}", // NOTE: APIKit does not support URITemplate format other than `path + query`
+                                                   "    var queryParameters: [String: Any]? {return pathVars.context}",
+                                                   "{% endif %}{% empty %}",
+                                                   "    var path: String {return \"{{ path }}\"}{% endfor %}",
                                                    "    var dataParser: DataParser {return RawDataParser()}",
                                                    "{% if paramType %}",
                                                    "    let param: {{ paramType }}",
@@ -52,10 +62,17 @@ struct Core {
                                                    "{% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):",
                                                    "            return try .{{ r.case }}({% if r.innerType %}Responses.{% endif %}{{ r.type }}.decodeValue(object))",
                                                    "{% endfor %}        default:",
-                                                   "            throw ResponseError.undefinedResponse(urlResponse.statusCode, contentType)",
+                                                   "            throw ResponseError.undefined(urlResponse.statusCode, contentType)",
                                                    "        }",
                                                    "    }",
                                                    "}\n"].joined(separator: "\n"))
+        let globalPathVarsTemplate = Template(templateString: [
+            "extension {{ fqn }}: URITemplateContextConvertible {",
+            "    var jsonBodyParametersObject: Any {",
+            "        var j: [String: Any] = [:]",
+            "{% for v in vars %}        j[\"{{ v.name }}\"] = {{ v.name }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j",
+            "    }",
+            "}\n"].joined(separator: "\n"))
         try transitions.forEach { transition in
             let request = transition.httpTransactions.first!.httpRequest
             let requestTypeName = transition.httpTransactions.first!.requestTypeName
@@ -98,6 +115,17 @@ struct Core {
                 "method": "." + request.method.lowercased(),
                 "path": transition.href
             ]
+            if let hrefVariables = transition.hrefVariables {
+                let pathVars: [[String: String]] = hrefVariables.members.map {
+                    ["name": $0.swiftName,
+                     "type": $0.swiftType,
+                     "doc": $0.swiftDoc]
+                }
+                context["pathVars"] = pathVars
+                globalExtensionCode += try globalPathVarsTemplate.render([
+                    "fqn": [requestTypeName, "PathVars"].joined(separator: "."),
+                    "vars": pathVars])
+            }
             if let ds = dss.first {
                 switch ds.element {
                 case "object":
@@ -183,6 +211,7 @@ struct APIBlueprintAttributes: Decodable {
     let typeAttributes: [String]?
     var required: Bool? {return typeAttributes?.contains("required")}
     let href: String?
+    let hrefVariables: APIBlueprintHrefVariables?
     let method: String?
     let statusCode: String?
     let headers: [String: String]?
@@ -199,9 +228,35 @@ struct APIBlueprintAttributes: Decodable {
         return try APIBlueprintAttributes(
             typeAttributes: e <||? "typeAttributes",
             href: e <|? "href",
+            hrefVariables: e <|? "hrefVariables",
             method: e <|? "method",
             statusCode: e <|? "statusCode",
             headers: headers)
+    }
+}
+
+struct APIBlueprintHrefVariables: Decodable {
+    let members: [APIBlueprintMember]
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintHrefVariables {
+        return try APIBlueprintHrefVariables(members: e <|| "content")
+    }
+}
+
+struct APIBlueprintMember: Decodable {
+    let meta: APIBlueprintMeta
+    let attributes: APIBlueprintAttributes
+    let content: APIBlueprintMemberContent
+
+    var swiftName: String {return content.name}
+    var swiftType: String {return content.type.swiftName(optional: attributes.required == false)}
+    var swiftDoc: String {return [meta.description, content.value.map {"ex. " + $0}].flatMap {$0}.joined(separator: " ")}
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintMember {
+        return try APIBlueprintMember(
+            meta: e <| "meta",
+            attributes: e <| "attributes",
+            content: e <| "content")
     }
 }
 
@@ -237,6 +292,10 @@ struct SwiftTypeName: Decodable {
         return keywords.contains(name) ? name + "_" : name
     }
 
+    func swiftName(optional: Bool) -> String {
+        return name + (optional ? "?" : "")
+    }
+
     static func decode(_ e: Extractor) throws -> SwiftTypeName {
         let raw: String = try e <| "element"
         let resolved = typeMap[raw].map {nameEscapingKeyword($0)} ?? raw
@@ -255,6 +314,7 @@ struct Transition {
     let title: String?
     let copy: String?
     let href: String
+    let hrefVariables: APIBlueprintHrefVariables?
     let httpTransactions: [HTTPTransaction]
 
     init(_ element: APIBlueprintElement, parentResource: APIBlueprintElement? = nil) throws {
@@ -263,6 +323,7 @@ struct Transition {
         self.title = element.meta?.title
         self.copy = element.elements(byName: "copy")?.first?.stringContent
         self.href = href
+        self.hrefVariables = element.attributes?.hrefVariables
         self.httpTransactions = try httpTransactions.map {try HTTPTransaction($0, href: href, title: element.meta?.title)}
     }
 }
