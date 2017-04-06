@@ -10,7 +10,7 @@ struct Core {
 
         var globalExtensionCode: String = ""
 
-        let transitions = ast.apiOverview.resourceGroup.flatMap {$0.resources}.flatMap {$0.transitions}
+        let transitions = ast.api.resourceGroup.flatMap {$0.resources}.flatMap {$0.transitions}
 
         func allResponses(href: String, method: String) -> [APIBlueprintTransition.Transaction.Response] {
             return transitions.filter {$0.href == href}
@@ -171,7 +171,7 @@ struct Core {
             try print(trTemplate.render(context))
         }
 
-        try ast.apiOverview.dataStructures.forEach { ds in
+        try ast.api.dataStructures.forEach { ds in
             let s = try swift(dataStructure: ds)
             globalExtensionCode += s.global
             print(s.local)
@@ -362,24 +362,24 @@ extension APIBlueprintCategoryDecodable {
 
 struct APIBlueprintAST: APIBlueprintElementDecodable {
     static let elementName = "parseResult"
-    let apiOverview: APIBlueprintAPIOverview
+    let api: APIBlueprintAPI
     let annotations: [APIBluprintAnnotation]
 
     static func decode(_ e: Extractor) throws -> APIBlueprintAST {
         return try APIBlueprintAST(
-            apiOverview: APIBlueprintAPIOverview.decodeElement(e),
+            api: APIBlueprintAPI.decodeElement(e),
             annotations: APIBluprintAnnotation.decodeElements(e))
     }
 }
 
-struct APIBlueprintAPIOverview: APIBlueprintCategoryDecodable {
+struct APIBlueprintAPI: APIBlueprintCategoryDecodable {
     static let className = "api"
     let title: String?
     let resourceGroup: [APIBlueprintResourceGroup]
     let dataStructures: [APIBlueprintDataStructure]
 
-    static func decode(_ e: Extractor) throws -> APIBlueprintAPIOverview {
-        return try APIBlueprintAPIOverview(
+    static func decode(_ e: Extractor) throws -> APIBlueprintAPI {
+        return try APIBlueprintAPI(
             title: e <|? ["meta", "title"],
             resourceGroup: APIBlueprintResourceGroup.decodeElements(e),
             dataStructures: APIBlueprintDataStructures.decodeElements(e).flatMap {
@@ -429,10 +429,6 @@ struct APIBluprintAnnotation: APIBlueprintElementDecodable {
         return APIBluprintAnnotation()
     }
 }
-
-
-
-
 
 struct APIBlueprintTransition: APIBlueprintElementDecodable {
     static let elementName = "transition"
@@ -568,20 +564,6 @@ enum APIBlueprintDataStructure: APIBlueprintElementDecodable {
     }
 }
 
-//struct APIBlueprintDataStructure: APIBlueprintElementDecodable {
-//    static let elementName = "dataStructure"
-//    let id: String?
-//    let members: [APIBlueprintMember]
-//
-//    var rawType: String {return id ?? "object"}
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintDataStructure {
-//        return try APIBlueprintDataStructure(
-//            id: e <|? ["content", "meta", "id"],
-//            members: APIBlueprintMember.decodeElementsOfContents(e))
-//    }
-//}
-
 protocol APIBlueprintElementDecodable: Decodable {
     static var elementName: String { get }
 }
@@ -617,90 +599,6 @@ extension APIBlueprintElementDecodable {
 
         return try subContentsJson.filter {$0["element"] as? String == elementName}.map(decodeValue)
     }
-}
-
-struct Transition {
-    let title: String?
-    let copy: String?
-    let href: String
-    let hrefVariables: APIBlueprintHrefVariables?
-    let httpTransactions: [HTTPTransaction]
-
-    init(_ element: APIBlueprintElement, parentResource: APIBlueprintElement? = nil) throws {
-        guard let href = element.attributes?.href ?? parentResource?.attributes?.href else { throw ConversionError.undefined }
-        guard let httpTransactions = element.elements(byName: "httpTransaction") else { throw ConversionError.undefined }
-        self.title = element.meta?.title
-        self.copy = element.elements(byName: "copy")?.first?.stringContent
-        self.href = href
-        self.hrefVariables = element.attributes?.hrefVariables
-        self.httpTransactions = try httpTransactions.map {try HTTPTransaction($0, href: href, title: element.meta?.title)}
-    }
-}
-
-struct HTTPTransaction {
-    private let title: String?
-    let httpRequest: Request
-    let httpResponse: Response
-    fileprivate let href: String
-
-    var requestTypeName: String {
-        if let title = title, let first = title.characters.first {
-            return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
-        } else {
-            return (httpRequest.method + "_" + href).swiftIdentifierized()
-        }
-    }
-
-    init(_ element: APIBlueprintElement, href: String, title: String?) throws {
-        guard let httpRequest = element.elements(byName: "httpRequest")?.first else { throw ConversionError.undefined }
-        guard let httpResponse = element.elements(byName: "httpResponse")?.first else { throw ConversionError.undefined }
-        self.title = title
-        self.httpRequest = try Request(httpRequest)
-        self.httpResponse = try Response(httpResponse)
-        self.href = href
-    }
-
-    struct Request: HTTPMessagePayload {
-        let copy: String? = nil
-        let headers: [String: String]?
-        let dataStructure: APIBlueprintElement?
-        let method: String
-
-        init(_ element: APIBlueprintElement) throws {
-            guard let method = element.attributes?.method else { throw ConversionError.undefined }
-            guard let dataStructures = element.elements(byName: "dataStructure") else { throw ConversionError.unknownDataStructure }
-            self.method = method
-            self.dataStructure = dataStructures.first
-            self.headers = element.attributes?.headers
-        }
-    }
-
-    struct Response: HTTPMessagePayload {
-        let copy: String? = nil
-        let headers: [String: String]?
-        let dataStructure: APIBlueprintElement?
-        let statusCode: Int // multiple Responses are identified by pair (statusCode, contentType) for a single Request
-        let contentType: String?
-
-        init(_ element: APIBlueprintElement) throws {
-            guard let dataStructures = element.elements(byName: "dataStructure") else { throw ConversionError.unknownDataStructure }
-            guard let statusCode = (element.attributes?.statusCode.flatMap {Int($0)}) else { throw ConversionError.undefined }
-            self.dataStructure = dataStructures.first
-            self.headers = element.attributes?.headers
-            self.statusCode = statusCode
-            self.contentType = headers?["Content-Type"]
-        }
-    }
-}
-
-protocol HTTPMessagePayload {
-    var headers: [String: String]? { get }
-    var copy: String? { get }
-    var dataStructure: APIBlueprintElement? { get } // The content MUST NOT contain more than one Data Structure.
-    var assets: [APIBlueprintElement]? { get } // The content SHOULD NOT contain more than one asset of its respective type. (body or body schema)
-}
-extension HTTPMessagePayload {
-    var assets: [APIBlueprintElement]? {return nil} // unsupported
 }
 
 func swift(dataStructure ds: APIBlueprintDataStructure, name: String? = nil) throws -> (local: String, global: String) {
