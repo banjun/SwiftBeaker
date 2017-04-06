@@ -5,19 +5,18 @@ import Stencil
 struct Core {
     static func main(file: String) throws {
         let j = try JSONSerialization.jsonObject(with: try Data(contentsOf: URL(fileURLWithPath: file)), options: [])
-        let apib = try APIBlueprintElement.decodeValue(j)
+
+        let ast = try APIBlueprintAST.decodeValue(j)
+
         var globalExtensionCode: String = ""
 
-        let resourceGroups = (apib.elements(byName: "category") ?? [])
-            .flatMap {$0.elements(byClass: "resourceGroup") ?? []}
-        let resources = resourceGroups.flatMap {$0.arrayContent ?? []}
-        let transitions = try resources.flatMap {r in try (r.elements(byName: "transition") ?? []).map {try Transition($0, parentResource: r)}}
+        let transitions = ast.apiOverview.resourceGroup.flatMap {$0.resources}.flatMap {$0.transitions}
 
-        func allResponses(href: String, method: String) -> [HTTPTransaction.Response] {
+        func allResponses(href: String, method: String) -> [APIBlueprintTransition.Transaction.Response] {
             return transitions.filter {$0.href == href}
                 .flatMap {$0.httpTransactions}
-                .filter {$0.httpRequest.method == method}
-                .map {$0.httpResponse}
+                .filter {$0.request.method == method}
+                .flatMap {$0.responses}
         }
 
         let trTemplate = Template(templateString: ["/// {{ copy }}",
@@ -89,22 +88,20 @@ struct Core {
             "    }",
             "}\n"].joined(separator: "\n"))
         try transitions.forEach { transition in
-            let request = transition.httpTransactions.first!.httpRequest
-            let requestTypeName = transition.httpTransactions.first!.requestTypeName
-            let dss = request.dataStructure?.arrayContent ?? []
-            guard dss.count <= 1 else { throw ConversionError.unknownDataStructure }
+            let request = transition.httpTransactions.first!.request
+            let requestTypeName = transition.requestTypeName(request: request)
 
             let siblingResponses = allResponses(href: transition.href, method: request.method)
             let responseCases = try siblingResponses.map { r -> [String: Any] in
                 let type: String
                 let contentTypeEscaped = (r.contentType ?? "").replacingOccurrences(of: "/", with: "_")
-                let rawType = (r.dataStructure?.arrayContent ?? []).first.flatMap {$0.element}.map {SwiftTypeName.nameEscapingKeyword($0)} ?? "Void"
+                let rawType = r.dataStructure.map {SwiftTypeName.nameEscapingKeyword($0.rawType)} ?? "Void"
                 let innerType: (local: String, global: String)?
                 switch rawType {
                 case "object":
                     // inner type
                     type = "Response\(r.statusCode)_\(contentTypeEscaped)"
-                    innerType = try swift(dataStructure: (r.dataStructure?.arrayContent ?? []).first!, name: "\(requestTypeName).Responses.\(type)")
+                    innerType = try swift(dataStructure: r.dataStructure!, name: "\(requestTypeName).Responses.\(type)")
                     _ = innerType.map {globalExtensionCode += $0.global}
                 default:
                     // external type (reference to type defined in Data Structures)
@@ -136,7 +133,7 @@ struct Core {
                      "name": $0.swiftName,
                      "type": $0.swiftType,
                      "doc": $0.swiftDoc,
-                     "optional": $0.attributes.required != true]
+                     "optional": $0.attributes?.required != true]
                 }
                 context["pathVars"] = pathVars
                 globalExtensionCode += try globalPathVarsTemplate.render([
@@ -155,8 +152,8 @@ struct Core {
                     "fqn": [requestTypeName, "HeaderVars"].joined(separator: "."),
                     "vars": headerVars])
             }
-            if let ds = dss.first {
-                switch ds.element {
+            if let ds = request.dataStructure {
+                switch ds.rawType {
                 case "object":
                     // inner type
                     context["paramType"] = "Param"
@@ -165,7 +162,7 @@ struct Core {
                     context["structParam"] = s.local.indented(by: 4)
                 default:
                     // external type (reference to type defined in Data Structures)
-                    context["paramType"] = ds.element
+                    context["paramType"] = ds.rawType
                 }
             }
             if let copy = transition.copy {
@@ -174,11 +171,7 @@ struct Core {
             try print(trTemplate.render(context))
         }
 
-        let dataStructures = (apib.elements(byName: "category") ?? [])
-            .flatMap {$0.elements(byClass: "dataStructures") ?? []}
-            .flatMap {$0.arrayContent ?? []}
-            .flatMap {$0.arrayContent ?? []}
-        try dataStructures.forEach { ds in
+        try ast.apiOverview.dataStructures.forEach { ds in
             let s = try swift(dataStructure: ds)
             globalExtensionCode += s.global
             print(s.local)
@@ -272,19 +265,20 @@ struct APIBlueprintHrefVariables: Decodable {
     }
 }
 
-struct APIBlueprintMember: Decodable {
-    let meta: APIBlueprintMeta
-    let attributes: APIBlueprintAttributes
+struct APIBlueprintMember: APIBlueprintElementDecodable {
+    static let elementName = "member"
+    let meta: APIBlueprintMeta?
+    let attributes: APIBlueprintAttributes?
     let content: APIBlueprintMemberContent
 
-    var swiftName: String {return content.name}
-    var swiftType: String {return content.type.swiftName(optional: attributes.required == false)}
-    var swiftDoc: String {return [meta.description, content.value.map {"ex. " + $0}].flatMap {$0}.joined(separator: " ")}
+    var swiftName: String {return content.name.swiftIdentifierized()}
+    var swiftType: String {return content.type.swiftName(optional: attributes?.required != true)}
+    var swiftDoc: String {return [meta?.description, content.value.map {" ex. " + $0}].flatMap {$0}.joined(separator: " ")}
 
     static func decode(_ e: Extractor) throws -> APIBlueprintMember {
         return try APIBlueprintMember(
-            meta: e <| "meta",
-            attributes: e <| "attributes",
+            meta: e <|? "meta",
+            attributes: e <|? "attributes",
             content: e <| "content")
     }
 }
@@ -336,6 +330,292 @@ struct SwiftTypeName: Decodable {
         default:
             return SwiftTypeName(name: resolved, raw: raw)
         }
+    }
+}
+
+protocol APIBlueprintCategoryDecodable: Decodable {
+    static var className: String { get }
+}
+extension APIBlueprintCategoryDecodable {
+    static func decodeElement(_ e: Extractor, key: String = "content") throws -> Self {
+        guard let contentsJson = (e.rawValue as? [String: Any])?[key] as? [[String: Any]],
+            let j = (contentsJson.first {
+                $0["element"] as? String == "category" &&
+                    (($0["meta"] as? [String: Any])?["classes"] as? [String])?.contains(className) == true}) else {
+            throw DecodeError.custom("no decodable content for \(self)")
+        }
+        return try decodeValue(j)
+    }
+
+    // filter matched elements and decode from hetero array
+    static func decodeElements(_ e: Extractor, key: String = "content") throws -> [Self] {
+        guard let contentsJson = (e.rawValue as? [String: Any])?[key] as? [[String: Any]] else {
+                        throw DecodeError.custom("no decodable content for \(self)")
+        }
+        let js = contentsJson.filter {
+            $0["element"] as? String == "category" &&
+                (($0["meta"] as? [String: Any])?["classes"] as? [String])?.contains(className) == true
+        }
+        return try js.map(decodeValue)
+    }
+}
+
+struct APIBlueprintAST: APIBlueprintElementDecodable {
+    static let elementName = "parseResult"
+    let apiOverview: APIBlueprintAPIOverview
+    let annotations: [APIBluprintAnnotation]
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintAST {
+        return try APIBlueprintAST(
+            apiOverview: APIBlueprintAPIOverview.decodeElement(e),
+            annotations: APIBluprintAnnotation.decodeElements(e))
+    }
+}
+
+struct APIBlueprintAPIOverview: APIBlueprintCategoryDecodable {
+    static let className = "api"
+    let title: String?
+    let resourceGroup: [APIBlueprintResourceGroup]
+    let dataStructures: [APIBlueprintDataStructure]
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintAPIOverview {
+        return try APIBlueprintAPIOverview(
+            title: e <|? ["meta", "title"],
+            resourceGroup: APIBlueprintResourceGroup.decodeElements(e),
+            dataStructures: APIBlueprintDataStructures.decodeElements(e).flatMap {
+                $0.dataStructures
+        })
+    }
+}
+
+struct APIBlueprintResourceGroup: APIBlueprintCategoryDecodable {
+    static let className = "resourceGroup"
+    let title: String?
+    let resources: [Resource]
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintResourceGroup {
+        return try APIBlueprintResourceGroup(
+            title: e <|? ["meta", "title"],
+            resources: Resource.decodeElements(e))
+    }
+
+    struct Resource: APIBlueprintElementDecodable {
+        static let elementName = "resource"
+        let title: String?
+        let transitions: [APIBlueprintTransition]
+
+        static func decode(_ e: Extractor) throws -> Resource {
+            return try Resource(
+                title: e <|? ["meta", "title"],
+                transitions: APIBlueprintTransition.decodeElements(e))
+        }
+    }
+}
+
+struct APIBlueprintDataStructures: APIBlueprintCategoryDecodable {
+    static let className = "dataStructures"
+    let dataStructures: [APIBlueprintDataStructure]
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintDataStructures {
+        return try APIBlueprintDataStructures(
+            dataStructures: APIBlueprintDataStructure.decodeElements(e))
+    }
+}
+
+struct APIBluprintAnnotation: APIBlueprintElementDecodable {
+    static let elementName = "annotation"
+
+    static func decode(_ e: Extractor) throws -> APIBluprintAnnotation {
+        return APIBluprintAnnotation()
+    }
+}
+
+
+
+
+
+struct APIBlueprintTransition: APIBlueprintElementDecodable {
+    static let elementName = "transition"
+
+    let meta: APIBlueprintMeta?
+    var title: String? {return meta?.title}
+
+    private let contents: [APIBlueprintElement]
+    var copy: String? {return contents.first {$0.element == "copy"}?.stringContent}
+
+    private let attributes: APIBlueprintTransitionAttributes
+    var href: String {return attributes.href}
+    var hrefVariables: APIBlueprintHrefVariables? {return attributes.hrefVariables}
+    let httpTransactions: [Transaction]
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintTransition {
+        return try APIBlueprintTransition(
+            meta: e <|? "meta",
+            contents: e <|| "content",
+            attributes: e <| "attributes",
+            httpTransactions: Transaction.decodeElements(e))
+    }
+
+    func requestTypeName(request: Transaction.Request) -> String {
+        if let title = title, let first = title.characters.first {
+            return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
+        } else {
+            return (request.method + "_" + href).swiftIdentifierized()
+        }
+    }
+
+    struct Transaction: APIBlueprintElementDecodable {
+        static let elementName = "httpTransaction"
+        let request: Request // currently supports single request per transaction
+        let responses: [Response]
+
+        static func decode(_ e: Extractor) throws -> Transaction {
+            return try Transaction(
+                request: Request.decodeElement(e),
+                responses: Response.decodeElements(e))
+        }
+
+        struct Request: APIBlueprintElementDecodable {
+            static let elementName = "httpRequest"
+            let method: String
+            let headers: [String: String]?
+            let dataStructure: APIBlueprintDataStructure?
+
+            static func decode(_ e: Extractor) throws -> Request {
+                let attributes: APIBlueprintAttributes = try e <| "attributes"
+                return try Request(
+                    method:  e <| ["attributes", "method"],
+                    headers: attributes.headers,
+                    dataStructure: {do {return try APIBlueprintDataStructure.decodeElement(e)} catch DecodeError.custom {return nil}}())
+            }
+        }
+
+        struct Response: APIBlueprintElementDecodable {
+            static let elementName = "httpResponse"
+            private let attributes: APIBlueprintAttributes
+            let statusCode: Int // multiple Responses are identified by pair (statusCode, contentType) for a single Request
+            let headers: [String: String]?
+            var contentType: String? {return headers?["Content-Type"]}
+            let dataStructure: APIBlueprintDataStructure?
+
+            static func decode(_ e: Extractor) throws -> Response {
+                let attributes: APIBlueprintAttributes = try e <| "attributes"
+                guard let statusCode = (attributes.statusCode.flatMap {Int($0)}) else { throw ConversionError.undefined }
+
+                return try Response(
+                    attributes: attributes,
+                    statusCode: statusCode,
+                    headers: attributes.headers,
+                    dataStructure: APIBlueprintDataStructure.decodeElementOptional(e))
+            }
+        }
+    }
+}
+
+struct APIBlueprintTransitionAttributes: Decodable {
+    let href: String
+    let hrefVariables: APIBlueprintHrefVariables?
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintTransitionAttributes {
+        return try APIBlueprintTransitionAttributes(
+            href: e <| "href",
+            hrefVariables: e <|? "hrefVariables")
+    }
+}
+
+enum APIBlueprintDataStructure: APIBlueprintElementDecodable {
+    static let elementName = "dataStructure"
+
+    case named(id: String, members: [APIBlueprintMember])
+    case anonymous(members: [APIBlueprintMember])
+    case ref(id: String)
+
+    var id: String? {
+        switch self {
+        case .named(let id, _): return id
+        case .ref(let id): return id
+        case .anonymous: return nil
+        }
+    }
+
+    var rawType: String {
+        switch self {
+        case .named(let id, _): return id
+        case .ref(let id): return id
+        case .anonymous: return "object"
+        }
+    }
+
+    var members: [APIBlueprintMember] {
+        switch self {
+        case .named(_, let members): return members
+        case .anonymous(let members): return members
+        case .ref: return []
+        }
+    }
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintDataStructure {
+        guard let content: APIBlueprintElement = try (e <|| "content").first else {
+            throw ConversionError.unknownDataStructure
+        }
+        if let id = content.meta?.id {
+            return .named(id: id, members: try APIBlueprintMember.decodeElementsOfContents(e))
+        }
+        if content.element == "object" {
+            return .anonymous(members: try APIBlueprintMember.decodeElementsOfContents(e))
+        }
+        return .ref(id: content.element)
+    }
+}
+
+//struct APIBlueprintDataStructure: APIBlueprintElementDecodable {
+//    static let elementName = "dataStructure"
+//    let id: String?
+//    let members: [APIBlueprintMember]
+//
+//    var rawType: String {return id ?? "object"}
+//
+//    static func decode(_ e: Extractor) throws -> APIBlueprintDataStructure {
+//        return try APIBlueprintDataStructure(
+//            id: e <|? ["content", "meta", "id"],
+//            members: APIBlueprintMember.decodeElementsOfContents(e))
+//    }
+//}
+
+protocol APIBlueprintElementDecodable: Decodable {
+    static var elementName: String { get }
+}
+extension APIBlueprintElementDecodable {
+    static func decodeElement(_ e: Extractor, key: String = "content") throws -> Self {
+        guard let decoded = try decodeElementOptional(e, key: key) else {
+            throw DecodeError.custom("no decodable content for \(self)")
+        }
+        return decoded
+    }
+
+    static func decodeElementOptional(_ e: Extractor, key: String = "content") throws -> Self? {
+        guard let contentsJson = (e.rawValue as? [String: Any])?[key] as? [[String: Any]],
+            let j = (contentsJson.first {$0["element"] as? String == elementName}) else {
+                return nil
+        }
+        return try decodeValue(j)
+    }
+
+    // filter matched elements and decode from hetero array
+    static func decodeElements(_ e: Extractor, key: String = "content") throws -> [Self] {
+        guard let contentsJson = (e.rawValue as? [String: Any])?[key] as? [[String: Any]] else {
+            throw DecodeError.custom("no decodable content for \(self)")
+        }
+        return try contentsJson.filter {$0["element"] as? String == elementName}.map(decodeValue)
+    }
+
+    static func decodeElementsOfContents(_ e: Extractor, key: String = "content", subKey: String = "content") throws -> [Self] {
+        guard let contentsJson = (e.rawValue as? [String: Any])?[key] as? [[String: Any]],
+            let subContentsJson = (contentsJson.first?[subKey] as? [[String: Any]]) else {
+            throw DecodeError.custom("no decodable content for \(self)")
+        }
+
+        return try subContentsJson.filter {$0["element"] as? String == elementName}.map(decodeValue)
     }
 }
 
@@ -423,7 +703,7 @@ extension HTTPMessagePayload {
     var assets: [APIBlueprintElement]? {return nil} // unsupported
 }
 
-func swift(dataStructure ds: APIBlueprintElement, name: String? = nil) throws -> (local: String, global: String) {
+func swift(dataStructure ds: APIBlueprintDataStructure, name: String? = nil) throws -> (local: String, global: String) {
     let localDSTemplate = Template(templateString: ["struct {{ name }} { {% for v in vars %}",
                                                     "    /// {{ v.doc }}",
                                                     "    var {{ v.name }}: {{ v.type }}{% endfor %}",
@@ -442,21 +722,16 @@ func swift(dataStructure ds: APIBlueprintElement, name: String? = nil) throws ->
                                                      "    }",
                                                      "}\n"].joined(separator: "\n"))
 
-    guard let name = ((name ?? ds.meta?.id).map {SwiftTypeName.nameEscapingKeyword($0)}) else { throw ConversionError.undefined }
-    let members = (ds.elements(byName: "member") ?? [])
-    let vars: [[String: Any]] = try members.map { m in
-        guard let content = m.memberContent else {
-            throw NSError(domain: "Data Structure Generation", code: 0, userInfo: [NSLocalizedDescriptionKey: "\(name) contains invalid member: \(m)"])
-        }
-        let doc = [m.meta?.description.map {$0 + " "}, content.value.map {"ex. " + $0}].flatMap {$0}.joined(separator: " ")
+    guard let name = ((name ?? ds.id).map {SwiftTypeName.nameEscapingKeyword($0)}) else { throw ConversionError.undefined }
+    let vars: [[String: Any]] = ds.members.map { m in
         let optional = m.attributes?.required != true
         let optionalSuffix = optional ? "?" : ""
         return [
-            "name": content.name.swiftIdentifierized(),
-            "type": content.type.name + optionalSuffix,
+            "name": m.swiftName,
+            "type": m.swiftType,
             "optional": optional,
-            "doc": doc,
-            "decoder": (content.type.isArray ? "<||" : "<|") + optionalSuffix]}
+            "doc": m.swiftDoc,
+            "decoder": (m.content.type.isArray ? "<||" : "<|") + optionalSuffix]}
 
     let localName = name.components(separatedBy: ".").last ?? name
     return (local: try localDSTemplate.render(["name": localName.swiftIdentifierized(),
