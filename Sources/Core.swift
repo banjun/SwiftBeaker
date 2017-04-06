@@ -44,6 +44,15 @@ struct Core {
                                                    "{% for r in responseCases %}        case {{ r.case }}({{ r.type }}){% if r.innerType %}",
                                                    "{{ r.innerType }}{% endif %}",
                                                    "{% endfor %}    }",
+                                                   "{% if headerVars %}",
+                                                   "    var headerFields: [String: String] {return headerVars.context as? [String: String] ?? [:]}",
+                                                   "    var headerVars: HeaderVars",
+                                                   "    struct HeaderVars {",
+                                                   "{% for v in headerVars %}       /// {{ v.doc }}",
+                                                   "        var {{ v.name }}: {{ v.type }}",
+                                                   "{% endfor %}",
+                                                   "    }",
+                                                   "{% endif %}",
                                                    "{% if pathVars %}",
                                                    "    // reconstruct URL to use URITemplate.expand. NOTE: APIKit does not support URITemplate format other than `path + query`",
                                                    "    func intercept(urlRequest: URLRequest) throws -> URLRequest {",
@@ -72,11 +81,11 @@ struct Core {
                                                    "        }",
                                                    "    }",
                                                    "}\n"].joined(separator: "\n"))
-        let globalPathVarsTemplate = Template(templateString: [
+        let globalPathVarsTemplate = Template(templateString: [ // FIXME: rename protocol name
             "extension {{ fqn }}: URITemplateContextConvertible {",
             "    var jsonBodyParametersObject: Any {",
             "        var j: [String: Any] = [:]",
-            "{% for v in vars %}        j[\"{{ v.name }}\"] = {{ v.name }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j",
+            "{% for v in vars %}        j[\"{{ v.key }}\"] = {{ v.name }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j",
             "    }",
             "}\n"].joined(separator: "\n"))
         try transitions.forEach { transition in
@@ -123,7 +132,8 @@ struct Core {
             ]
             if let hrefVariables = transition.hrefVariables {
                 let pathVars: [[String: Any]] = hrefVariables.members.map {
-                    ["name": $0.swiftName,
+                    ["key": $0.content.name,
+                     "name": $0.swiftName,
                      "type": $0.swiftType,
                      "doc": $0.swiftDoc,
                      "optional": $0.attributes.required != true]
@@ -132,6 +142,18 @@ struct Core {
                 globalExtensionCode += try globalPathVarsTemplate.render([
                     "fqn": [requestTypeName, "PathVars"].joined(separator: "."),
                     "vars": pathVars])
+            }
+            if let headers = request.headers {
+                let headerVars = headers.map { (k, v) in
+                    ["key": k,
+                     "name": k.lowercased().swiftIdentifierized(),
+                     "type": "String",
+                     "doc": v]
+                }
+                context["headerVars"] = headerVars
+                globalExtensionCode += try globalPathVarsTemplate.render([
+                    "fqn": [requestTypeName, "HeaderVars"].joined(separator: "."),
+                    "vars": headerVars])
             }
             if let ds = dss.first {
                 switch ds.element {
@@ -360,7 +382,7 @@ struct HTTPTransaction {
 
     struct Request: HTTPMessagePayload {
         let copy: String? = nil
-        let headers: [String: String]? = nil
+        let headers: [String: String]?
         let dataStructure: APIBlueprintElement?
         let method: String
 
@@ -369,6 +391,7 @@ struct HTTPTransaction {
             guard let dataStructures = element.elements(byName: "dataStructure") else { throw ConversionError.unknownDataStructure }
             self.method = method
             self.dataStructure = dataStructures.first
+            self.headers = element.attributes?.headers
         }
     }
 
