@@ -13,7 +13,7 @@ struct Core {
         let transitions = ast.api.resourceGroup.flatMap {$0.resources}.flatMap {$0.transitions}
 
         func allResponses(href: String, method: String) -> [APIBlueprintTransition.Transaction.Response] {
-            return transitions.filter {$0.href == href}
+            return transitions.filter {$0.attributes.href == href}
                 .flatMap {$0.httpTransactions}
                 .filter {$0.request.method == method}
                 .flatMap {$0.responses}
@@ -91,11 +91,11 @@ struct Core {
             let request = transition.httpTransactions.first!.request
             let requestTypeName = transition.requestTypeName(request: request)
 
-            let siblingResponses = allResponses(href: transition.href, method: request.method)
+            let siblingResponses = allResponses(href: transition.attributes.href, method: request.method)
             let responseCases = try siblingResponses.map { r -> [String: Any] in
                 let type: String
                 let contentTypeEscaped = (r.contentType ?? "").replacingOccurrences(of: "/", with: "_")
-                let rawType = r.dataStructure.map {SwiftTypeName.nameEscapingKeyword($0.rawType)} ?? "Void"
+                let rawType = r.dataStructure.map {$0.rawType.swiftTypeMapped().swiftKeywordsEscaped()} ?? "Void"
                 let innerType: (local: String, global: String)?
                 switch rawType {
                 case "object":
@@ -125,22 +125,22 @@ struct Core {
                 "response": "Responses",
                 "responseCases": responseCases,
                 "method": "." + request.method.lowercased(),
-                "path": transition.href
+                "path": transition.attributes.href
             ]
-            if let hrefVariables = transition.hrefVariables {
+            if let hrefVariables = transition.attributes.hrefVariables {
                 let pathVars: [[String: Any]] = hrefVariables.members.map {
                     ["key": $0.content.name,
                      "name": $0.swiftName,
                      "type": $0.swiftType,
                      "doc": $0.swiftDoc,
-                     "optional": $0.attributes?.required != true]
+                     "optional": !$0.required]
                 }
                 context["pathVars"] = pathVars
                 globalExtensionCode += try globalPathVarsTemplate.render([
                     "fqn": [requestTypeName, "PathVars"].joined(separator: "."),
                     "vars": pathVars])
             }
-            if let headers = request.headers {
+            if let headers = request.headers?.dictionary, !headers.isEmpty {
                 let headerVars = headers.map { (k, v) in
                     ["key": k,
                      "name": k.lowercased().swiftIdentifierized(),
@@ -166,7 +166,7 @@ struct Core {
                 }
             }
             if let copy = transition.copy {
-                context["copy"] = copy
+                context["copy"] = copy.text
             }
             try print(trTemplate.render(context))
         }
@@ -185,6 +185,7 @@ struct Core {
 enum ConversionError: Error {
     case undefined
     case unknownDataStructure
+    case notSupported(String)
 }
 
 func swift(dataStructure ds: APIBlueprintDataStructure, name: String? = nil) throws -> (local: String, global: String) {
@@ -206,9 +207,9 @@ func swift(dataStructure ds: APIBlueprintDataStructure, name: String? = nil) thr
                                                      "    }",
                                                      "}\n"].joined(separator: "\n"))
 
-    guard let name = ((name ?? ds.id).map {SwiftTypeName.nameEscapingKeyword($0)}) else { throw ConversionError.undefined }
+    guard let name = ((name ?? ds.id).map {$0.swiftKeywordsEscaped()}) else { throw ConversionError.undefined }
     let vars: [[String: Any]] = ds.members.map { m in
-        let optional = m.attributes?.required != true
+        let optional = !m.required
         let optionalSuffix = optional ? "?" : ""
         return [
             "name": m.swiftName,
@@ -228,6 +229,19 @@ func swift(dataStructure ds: APIBlueprintDataStructure, name: String? = nil) thr
 extension String {
     func indented(by level: Int) -> String {
         return components(separatedBy: "\n").map {Array(repeating: " ", count: level).joined() + $0}.joined(separator: "\n")
+    }
+
+    func swiftKeywordsEscaped() -> String {
+        let keywords = ["Error"]
+        return keywords.contains(self) ? self + "_" : self
+    }
+
+    func swiftTypeMapped() -> String {
+        let typeMap = ["string": "String",
+                       "number": "Int",
+                       "enum": "Int",
+                       "boolean": "Bool"]
+        return typeMap[self] ?? self
     }
 
     func swiftIdentifierized() -> String {

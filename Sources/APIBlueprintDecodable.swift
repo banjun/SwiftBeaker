@@ -12,7 +12,8 @@ extension APIBlueprintElementDecodable {
     }
 
     static func decodeElementOptional(_ e: Extractor, key: String = "content") throws -> Self? {
-        guard let contentsJson = (e.rawValue as? [String: Any])?[key] as? [[String: Any]],
+        let arrayOrDict = (e.rawValue as? [String: Any])?[key]
+        guard let contentsJson = (arrayOrDict as? [[String: Any]]) ?? ([arrayOrDict] as? [[String: Any]]),
             let j = (contentsJson.first {$0["element"] as? String == elementName}) else {
                 return nil
         }

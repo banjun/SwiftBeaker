@@ -68,24 +68,29 @@ struct APIBlueprintDataStructures: APIBlueprintCategoryDecodable {
 
 // MARK: - Elements
 
+struct APIBlueprintCopy: APIBlueprintElementDecodable {
+    static let elementName = "copy"
+    let text: String
+    static func decode(_ e: Extractor) throws -> APIBlueprintCopy {
+        return try APIBlueprintCopy(text: e <| "content")
+    }
+}
+
 struct APIBlueprintTransition: APIBlueprintElementDecodable {
     static let elementName = "transition"
 
     let meta: APIBlueprintMeta?
     var title: String? {return meta?.title}
 
-    private let contents: [APIBlueprintElement]
-    var copy: String? {return contents.first {$0.element == "copy"}?.stringContent}
+    let copy: APIBlueprintCopy?
 
-    private let attributes: APIBlueprintTransitionAttributes
-    var href: String {return attributes.href}
-    var hrefVariables: APIBlueprintHrefVariables? {return attributes.hrefVariables}
+    let attributes: Attributes
     let httpTransactions: [Transaction]
 
     static func decode(_ e: Extractor) throws -> APIBlueprintTransition {
         return try APIBlueprintTransition(
             meta: e <|? "meta",
-            contents: e <|| "content",
+            copy: APIBlueprintCopy.decodeElementOptional(e),
             attributes: e <| "attributes",
             httpTransactions: Transaction.decodeElements(e))
     }
@@ -94,7 +99,26 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
         if let title = title, let first = title.characters.first {
             return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
         } else {
-            return (request.method + "_" + href).swiftIdentifierized()
+            return (request.method + "_" + attributes.href).swiftIdentifierized()
+        }
+    }
+
+    struct Attributes: Decodable {
+        let href: String
+        let hrefVariables: HrefVariables?
+
+        static func decode(_ e: Extractor) throws -> Attributes {
+            return try Attributes(
+                href: e <| "href",
+                hrefVariables: HrefVariables.decodeElementOptional(e, key: HrefVariables.elementName))
+        }
+
+        struct HrefVariables: APIBlueprintElementDecodable {
+            static let elementName = "hrefVariables"
+            let members: [APIBlueprintMember]
+            static func decode(_ e: Extractor) throws -> HrefVariables {
+                return try HrefVariables(members: APIBlueprintMember.decodeElements(e))
+            }
         }
     }
 
@@ -112,75 +136,64 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
         struct Request: APIBlueprintElementDecodable {
             static let elementName = "httpRequest"
             let method: String
-            let headers: [String: String]?
+            let headers: Headers?
             let dataStructure: APIBlueprintDataStructure?
 
             static func decode(_ e: Extractor) throws -> Request {
-                let attributes: APIBlueprintAttributes = try e <| "attributes"
                 return try Request(
                     method:  e <| ["attributes", "method"],
-                    headers: attributes.headers,
+                    headers: e <|? ["attributes", "headers"],
                     dataStructure: {do {return try APIBlueprintDataStructure.decodeElement(e)} catch DecodeError.custom {return nil}}())
             }
         }
 
         struct Response: APIBlueprintElementDecodable {
             static let elementName = "httpResponse"
-            private let attributes: APIBlueprintAttributes
             let statusCode: Int // multiple Responses are identified by pair (statusCode, contentType) for a single Request
-            let headers: [String: String]?
-            var contentType: String? {return headers?["Content-Type"]}
+            let headers: Headers?
+            let contentType: String?
             let dataStructure: APIBlueprintDataStructure?
 
             static func decode(_ e: Extractor) throws -> Response {
-                let attributes: APIBlueprintAttributes = try e <| "attributes"
-                guard let statusCode = (attributes.statusCode.flatMap {Int($0)}) else { throw ConversionError.undefined }
+                guard let statusCode = ((try e <|? ["attributes", "statusCode"]).flatMap {Int($0)}) else {
+                    throw ConversionError.undefined
+                }
+                let headers: Headers? = try e <|? ["attributes", "headers"]
 
                 return try Response(
-                    attributes: attributes,
                     statusCode: statusCode,
-                    headers: attributes.headers,
+                    headers: headers,
+                    contentType: headers?.members.map {$0.content}.first {$0.name == "Content-Type"}?.value,
                     dataStructure: APIBlueprintDataStructure.decodeElementOptional(e))
             }
         }
-    }
-}
 
-struct APIBlueprintTransitionAttributes: Decodable {
-    let href: String
-    let hrefVariables: APIBlueprintHrefVariables?
-
-    static func decode(_ e: Extractor) throws -> APIBlueprintTransitionAttributes {
-        return try APIBlueprintTransitionAttributes(
-            href: e <| "href",
-            hrefVariables: e <|? "hrefVariables")
+        struct Headers: Decodable {
+            static let elementName = "httpHeaders"
+            let members: [APIBlueprintMember]
+            static func decode(_ e: Extractor) throws -> Headers {
+                return try Headers(members: APIBlueprintMember.decodeElements(e))
+            }
+            var dictionary: [String: String] {
+                var d = [String: String]()
+                members.forEach {
+                    guard $0.content.name != "Content-Type" else { return } // ignore Content-Type
+                    d[$0.content.name] = $0.content.value
+                }
+                return d
+            }
+        }
     }
 }
 
 struct APIBlueprintElement: Decodable {
     let element: String
     let meta: APIBlueprintMeta?
-    let arrayContent: [APIBlueprintElement]?
-    let memberContent: APIBlueprintMemberContent?
-    let stringContent: String?
-    let attributes: APIBlueprintAttributes?
 
     static func decode(_ e: Extractor) throws -> APIBlueprintElement {
         return try APIBlueprintElement(
             element: e <| "element",
-            meta: e <|? "meta",
-            arrayContent: {do {return try e <||? "content"} catch DecodeError.typeMismatch {return nil}}(),
-            memberContent: {do {return try e <|? "content"} catch DecodeError.typeMismatch {return nil}}(),
-            stringContent: {do {return try e <|? "content"} catch DecodeError.typeMismatch {return nil}}(),
-            attributes: e <|? "attributes")
-    }
-
-    func elements(byName name: String) -> [APIBlueprintElement]? {
-        return (arrayContent ?? []).filter {$0.element == name}
-    }
-
-    func elements(byClass c: String) -> [APIBlueprintElement]? {
-        return (arrayContent ?? []).filter {$0.meta?.classes?.contains(c) == true}
+            meta: e <|? "meta")
     }
 }
 
@@ -199,75 +212,117 @@ struct APIBlueprintMeta: Decodable {
     }
 }
 
-struct APIBlueprintAttributes: Decodable {
-    let typeAttributes: [String]?
-    var required: Bool? {return typeAttributes?.contains("required")}
-    let href: String?
-    let hrefVariables: APIBlueprintHrefVariables?
-    let method: String?
-    let statusCode: String?
-    let headers: [String: String]?
-
-    static func decode(_ e: Extractor) throws -> APIBlueprintAttributes {
-        var headers: [String: String]?
-        if let headersElement: APIBlueprintElement = (try e <|? "headers") {
-            headers = [:]
-            headersElement.elements(byName: "member")?.flatMap {$0.memberContent}.forEach { m in
-                headers?[m.name] = m.value
-            }
-        }
-
-        return try APIBlueprintAttributes(
-            typeAttributes: e <||? "typeAttributes",
-            href: e <|? "href",
-            hrefVariables: e <|? "hrefVariables",
-            method: e <|? "method",
-            statusCode: e <|? "statusCode",
-            headers: headers)
-    }
-}
-
-struct APIBlueprintHrefVariables: Decodable {
-    let members: [APIBlueprintMember]
-
-    static func decode(_ e: Extractor) throws -> APIBlueprintHrefVariables {
-        return try APIBlueprintHrefVariables(members: e <|| "content")
-    }
-}
-
 struct APIBlueprintMember: APIBlueprintElementDecodable {
     static let elementName = "member"
     let meta: APIBlueprintMeta?
-    let attributes: APIBlueprintAttributes?
+    let typeAttributes: [String]?
+    var required: Bool {return typeAttributes?.contains("required") == true}
     let content: APIBlueprintMemberContent
-
-    var swiftName: String {return content.name.swiftIdentifierized()}
-    var swiftType: String {return content.type.swiftName(optional: attributes?.required != true)}
-    var swiftDoc: String {return [meta?.description, content.value.map {" ex. " + $0}].flatMap {$0}.joined(separator: " ")}
 
     static func decode(_ e: Extractor) throws -> APIBlueprintMember {
         return try APIBlueprintMember(
             meta: e <|? "meta",
-            attributes: e <|? "attributes",
+            typeAttributes: e <||? ["attributes", "typeAttributes"],
             content: e <| "content")
+    }
+}
+
+extension APIBlueprintMember {
+    var swiftName: String {return content.name.swiftIdentifierized()}
+    var swiftType: String {
+        let name: String
+        switch content.type {
+        case let .exact(t):
+            name = t.swiftTypeMapped().swiftKeywordsEscaped()
+        case let .array(t):
+            name = "[" + (t.map {$0.swiftTypeMapped().swiftKeywordsEscaped()} ?? "Any") + "]"
+        }
+        return name + (required ? "" : "?")
+    }
+    var swiftDoc: String {return [meta?.description, content.displayValue.map {" ex. " + $0}].flatMap {$0}.joined(separator: " ")}
+}
+
+struct APIBlueprintStringElement: APIBlueprintElementDecodable {
+    static let elementName = "string"
+    let value: String
+    static func decode(_ e: Extractor) throws -> APIBlueprintStringElement {
+        return try APIBlueprintStringElement(value: e <| "content")
     }
 }
 
 struct APIBlueprintMemberContent: Decodable {
     let name: String
-    let type: SwiftTypeName
-    let value: String?
+    let type: APIBlueprintMemberType
+    let value: String? // value, 42, [value], ...
+    let displayValue: String? // "value", 42, ["value"], ...
 
     static func decode(_ e: Extractor) throws -> APIBlueprintMemberContent {
-        let valueString: String? = try {do {return try e <|? ["value", "content"]} catch DecodeError.typeMismatch {return nil}}()
-        let valueDict: [String: String]? = try {do {return try e <|-|? ["value", "content"]} catch DecodeError.typeMismatch {return nil}}()
-        let valueElements: [APIBlueprintElement]? = try {do {return try e <||? ["value", "content"]} catch DecodeError.typeMismatch {return nil}}()
-        let value: String? = valueString ?? valueDict?["element"] ?? valueElements.map { e -> String in "[" + e.flatMap {$0.stringContent}.joined(separator: ", ") + "]"}
+        let value: String?
+        let displayValue: String?
+        let type: APIBlueprintMemberType = try e <| "value"
+        switch type {
+        case .exact("string"):
+            let string: String? = try e <|? ["value", "content"]
+            value = string
+            displayValue = value.map {"\"" + $0 + "\""}
+        case .exact("number"):
+            let number: Int? = try e <|? ["value", "content"]
+            value = number.map {String($0)}
+            displayValue = value
+        case .array:
+            let contents = try StringArrayValue.decodeElement(e, key: "value").content
+            value = "[" + contents.map {$0.value}.joined(separator: ", ") + "]"
+            displayValue = "[" + contents.map {"\"" + $0.value + "\""}.joined(separator: ", ") + "]"
+        case .exact("enum"):
+            throw ConversionError.notSupported("\(type) at \(self)")
+        case let .exact(id):
+            value = id
+            displayValue = value
+        }
 
         return try APIBlueprintMemberContent(
             name: e <| ["key", "content"],
-            type: e <| ["value"],
-            value: value)
+            type: type,
+            value: value,
+            displayValue: displayValue)
+    }
+
+    struct StringArrayValue: APIBlueprintElementDecodable {
+        static let elementName = "array"
+        let content: [APIBlueprintStringElement]
+        static func decode(_ e: Extractor) throws -> StringArrayValue {
+            return try StringArrayValue(content: APIBlueprintStringElement.decodeElements(e))
+        }
+    }
+}
+
+enum APIBlueprintMemberType: Decodable {
+    case exact(String)
+    case array(String?)
+
+    var isArray: Bool {
+        switch self {
+        case .exact: return false
+        case .array: return true
+        }
+    }
+
+    static func decode(_ e: Extractor) throws -> APIBlueprintMemberType {
+        let raw: String = try e <| "element"
+        switch raw {
+        case "array":
+            let contentTypes: [APIBlueprintAnyElement] = try e <|| "content"
+            return .array(contentTypes.first?.element)
+        default:
+            return .exact(raw)
+        }
+    }
+}
+
+struct APIBlueprintAnyElement: Decodable {
+    let element: String
+    static func decode(_ e: Extractor) throws -> APIBlueprintAnyElement {
+        return try APIBlueprintAnyElement(element: e <| "element")
     }
 }
 
@@ -321,39 +376,5 @@ struct APIBluprintAnnotation: APIBlueprintElementDecodable {
 
     static func decode(_ e: Extractor) throws -> APIBluprintAnnotation {
         return APIBluprintAnnotation()
-    }
-}
-
-// MARK: - 
-
-struct SwiftTypeName: Decodable {
-    let name: String
-    private let raw: String
-    var isArray: Bool {return raw == "array"}
-
-    static let typeMap = ["string": "String",
-                          "number": "Int",
-                          "enum": "Int",
-                          "boolean": "Bool"]
-    static let keywords = ["Error"]
-    static func nameEscapingKeyword(_ name: String) -> String {
-        return keywords.contains(name) ? name + "_" : name
-    }
-
-    func swiftName(optional: Bool) -> String {
-        return name + (optional ? "?" : "")
-    }
-
-    static func decode(_ e: Extractor) throws -> SwiftTypeName {
-        let raw: String = try e <| "element"
-        let resolved = typeMap[raw].map {nameEscapingKeyword($0)} ?? raw
-        switch resolved {
-        case "array":
-            let contents: [APIBlueprintElement] = try e <|| "content"
-            let resolved = contents.first.map {$0.element}.map {typeMap[$0] ?? $0} ?? "Any"
-            return SwiftTypeName(name: "[" + resolved + "]", raw: raw)
-        default:
-            return SwiftTypeName(name: resolved, raw: raw)
-        }
     }
 }
