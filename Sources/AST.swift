@@ -95,14 +95,6 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
             httpTransactions: Transaction.decodeElements(e))
     }
 
-    func requestTypeName(request: Transaction.Request) -> String {
-        if let title = title, let first = title.characters.first {
-            return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
-        } else {
-            return (request.method + "_" + attributes.href).swiftIdentifierized()
-        }
-    }
-
     struct Attributes: Decodable {
         let href: String
         let hrefVariables: HrefVariables?
@@ -225,21 +217,6 @@ struct APIBlueprintMember: APIBlueprintElementDecodable {
             typeAttributes: e <||? ["attributes", "typeAttributes"],
             content: e <| "content")
     }
-}
-
-extension APIBlueprintMember {
-    var swiftName: String {return content.name.swiftIdentifierized()}
-    var swiftType: String {
-        let name: String
-        switch content.type {
-        case let .exact(t):
-            name = t.swiftTypeMapped().swiftKeywordsEscaped()
-        case let .array(t):
-            name = "[" + (t.map {$0.swiftTypeMapped().swiftKeywordsEscaped()} ?? "Any") + "]"
-        }
-        return name + (required ? "" : "?")
-    }
-    var swiftDoc: String {return [meta?.description, content.displayValue.map {" ex. " + $0}].flatMap {$0}.joined(separator: " ")}
 }
 
 struct APIBlueprintStringElement: APIBlueprintElementDecodable {

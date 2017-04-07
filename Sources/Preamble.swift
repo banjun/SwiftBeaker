@@ -1,7 +1,6 @@
 // TODO: move to separate resource file
 
 let preamble = [
-    "// MARK: - Preamble",
     "import Foundation",
     "import APIKit",
     "import Himotoki",
@@ -37,5 +36,4 @@ let preamble = [
     "    var contentType: String? {return nil}",
     "    func parse(data: Data) -> Any { return data }",
     "}",
-    "",
-    "// MARK: - Extensions"].joined(separator: "\n")
+    ""].joined(separator: "\n")
