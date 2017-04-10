@@ -108,7 +108,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                                                    "    var dataParser: DataParser {return RawDataParser()}",
                                                    "{% if paramType %}",
                                                    "    let param: {{ paramType }}",
-                                                   "    var bodyParameters: BodyParameters? {return param.jsonBodyParameters}{% endif %}{% if structParam %}",
+                                                   "    var bodyParameters: BodyParameters? {return {% if paramType == \"String\" %}TextBodyParameters(contentType: \"{{ paramContentType }}\", content: param){% else %}param.jsonBodyParameters{% endif %}}{% endif %}{% if structParam %}",
                                                    "{{ structParam }}{% endif %}",
                                                    "    enum Responses {",
                                                    "{% for r in responseCases %}        case {{ r.case }}({{ r.type }}){% if r.innerType %}",
@@ -151,7 +151,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                                                    "        let contentType = (urlResponse.allHeaderFields[\"Content-Type\"] as? String)?.components(separatedBy: \";\").first?.trimmingCharacters(in: .whitespaces)",
                                                    "        switch (urlResponse.statusCode, contentType) {",
                                                    "{% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):",
-                                                   "            return try .{{ r.case }}({% if r.innerType %}Responses.{% endif %}{{ r.type }}.decodeValue(object))",
+                                                   "            return .{{ r.case }}({% if r.type != \"Void\" %}try {% if r.innerType %}Responses.{% endif %}{{ r.type }}.decodeValue(object){% endif %})",
                                                    "{% endfor %}        default:",
                                                    "            throw ResponseError.undefined(urlResponse.statusCode, contentType)",
                                                    "        }",
@@ -185,7 +185,8 @@ extension APIBlueprintTransition: SwiftConvertible {
                     type = "String"
                     innerType = nil
                 default:
-                    throw ConversionError.notSupported(r.contentType ?? "empty ContentType")
+                    type = "Void"
+                    innerType = nil
                 }
             case .named?:
                 throw ConversionError.unknownDataStructure
@@ -234,17 +235,24 @@ extension APIBlueprintTransition: SwiftConvertible {
                 "fqn": [requestTypeName, "HeaderVars"].joined(separator: "."),
                 "vars": headerVars])
         }
-        if let ds = request.dataStructure {
-            switch ds.rawType {
-            case "object":
-                // inner type
-                context["paramType"] = "Param"
-                let s = try ds.swift("\(requestTypeName).Param")
-                globalExtensionCode += s.global
-                context["structParam"] = s.local.indented(by: 4)
-            default:
-                // external type (reference to type defined in Data Structures)
-                context["paramType"] = ds.rawType
+        switch request.dataStructure {
+        case let .anonymous(members)?:
+            // inner type
+            let ds = APIBlueprintDataStructure.anonymous(members: members)
+            context["paramType"] = "Param"
+            let s = try ds.swift("\(requestTypeName).Param")
+            globalExtensionCode += s.global
+            context["structParam"] = s.local.indented(by: 4)
+        case let .ref(id: id)?:
+            let ds = APIBlueprintDataStructure.ref(id: id)
+            // external type (reference to type defined in Data Structures)
+            context["paramType"] = ds.id
+        case .named?:
+            throw ConversionError.notSupported("named DataStructure definition in a request param")
+        case nil:
+            if let requestContentType = request.headers?.contentType?.value, requestContentType.hasPrefix("text/") {
+                context["paramType"] = "String"
+                context["paramContentType"] = requestContentType
             }
         }
         context["copy"] = copy?.text

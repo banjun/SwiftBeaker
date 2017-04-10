@@ -176,7 +176,7 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
                 return try Response(
                     statusCode: statusCode,
                     headers: headers,
-                    contentType: headers?.members.map {$0.content}.first {$0.name == "Content-Type"}?.value,
+                    contentType: headers?.contentType?.value,
                     dataStructure: APIBlueprintDataStructure.decodeElementOptional(e))
             }
         }
@@ -194,6 +194,9 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
                     d[$0.content.name] = $0.content.value
                 }
                 return d
+            }
+            var contentType: APIBlueprintMemberContent? {
+                return members.map {$0.content}.first {$0.name == "Content-Type"}
             }
         }
     }
