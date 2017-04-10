@@ -75,12 +75,19 @@ extension APIBlueprintDataStructure: SwiftConvertible {
 }
 
 extension APIBlueprintTransition: SwiftConvertible {
-    func swift(_ otherTransitions: [APIBlueprintTransition]) throws -> SwiftCode {
-        func allResponses(href: String, method: String) -> [APIBlueprintTransition.Transaction.Response] {
-            return otherTransitions.filter {$0.attributes.href == href}
-                .flatMap {$0.httpTransactions}
-                .filter {$0.request.method == method}
-                .flatMap {$0.responses}
+    func swift(_ resource: APIBlueprintResourceGroup.Resource) throws -> SwiftCode {
+        var globalExtensionCode = ""
+        let request = httpTransactions.first!.request
+        let requestTypeName = try swiftRequestTypeName(request: request, resource: resource)
+        let href = try resource.href(transition: self, request: request)
+        let otherTransitions = resource.transitions
+
+        func allResponses(method: String) throws -> [APIBlueprintTransition.Transaction.Response] {
+            return try otherTransitions
+                .flatMap {t in t.httpTransactions.map {(transition: t, transaction: $0)}}
+                .filter {try $0.transaction.request.method == method &&
+                    resource.href(transition: $0.transition, request: $0.transaction.request) == href}
+                .flatMap {$0.transaction.responses}
         }
 
         let trTemplate = Template(templateString: ["/// {{ copy }}",
@@ -129,6 +136,12 @@ extension APIBlueprintTransition: SwiftConvertible {
                                                    "        let contentType = (urlResponse.allHeaderFields[\"Content-Type\"] as? String)?.components(separatedBy: \";\").first?.trimmingCharacters(in: .whitespaces)",
                                                    "        switch (object, contentType) {",
                                                    "        case let (data as Data, \"application/json\"?): return try JSONSerialization.jsonObject(with: data, options: [])",
+                                                   "        case let (data as Data, \"text/plain\"?):",
+                                                   "            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }",
+                                                   "            return s",
+                                                   "        case let (data as Data, \"text/html\"?):",
+                                                   "            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }",
+                                                   "            return s",
                                                    "        case let (data as Data, _): return data",
                                                    "        default: return object",
                                                    "        }",
@@ -152,26 +165,30 @@ extension APIBlueprintTransition: SwiftConvertible {
             "    }",
             "}\n"].joined(separator: "\n"))
 
-        var globalExtensionCode = ""
-        let request = httpTransactions.first!.request
-        let requestTypeName = swiftRequestTypeName(request: request)
-
-        let siblingResponses = allResponses(href: attributes.href, method: request.method)
+        let siblingResponses = try allResponses(method: request.method)
         let responseCases = try siblingResponses.map { r -> [String: Any] in
             let type: String
             let contentTypeEscaped = (r.contentType ?? "").replacingOccurrences(of: "/", with: "_")
-            let rawType = r.dataStructure.map {$0.rawType.swiftTypeMapped().swiftKeywordsEscaped()} ?? "Void"
             let innerType: (local: String, global: String)?
-            switch rawType {
-            case "object":
-                // inner type
+            switch r.dataStructure {
+            case .anonymous?:
                 type = "Response\(r.statusCode)_\(contentTypeEscaped)"
                 innerType = try r.dataStructure!.swift("\(requestTypeName).Responses.\(type)")
                 _ = innerType.map {globalExtensionCode += $0.global}
-            default:
+            case let .ref(id: id)?:
                 // external type (reference to type defined in Data Structures)
-                type = rawType
+                type = id
                 innerType = nil
+            case nil:
+                switch r.contentType {
+                case "text/plain"?, "text/html"?:
+                    type = "String"
+                    innerType = nil
+                default:
+                    throw ConversionError.notSupported(r.contentType ?? "empty ContentType")
+                }
+            case .named?:
+                throw ConversionError.unknownDataStructure
             }
             var context: [String: String] = [
                 "statusCode": String(r.statusCode),
@@ -190,9 +207,9 @@ extension APIBlueprintTransition: SwiftConvertible {
             "response": "Responses",
             "responseCases": responseCases,
             "method": "." + request.method.lowercased(),
-            "path": attributes.href
+            "path": href
         ]
-        if let hrefVariables = attributes.hrefVariables {
+        if let hrefVariables = attributes?.hrefVariables {
             let pathVars: [[String: Any]] = hrefVariables.members.map {
                 ["key": $0.content.name,
                  "name": $0.swiftName,
@@ -236,11 +253,11 @@ extension APIBlueprintTransition: SwiftConvertible {
     }
 
 
-    func swiftRequestTypeName(request: Transaction.Request) -> String {
+    func swiftRequestTypeName(request: Transaction.Request, resource: APIBlueprintResourceGroup.Resource) throws -> String {
         if let title = title, let first = title.characters.first {
             return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
         } else {
-            return (request.method + "_" + attributes.href).swiftIdentifierized()
+            return try (request.method + "_" + resource.href(transition: self, request: request)).swiftIdentifierized()
         }
     }
 }

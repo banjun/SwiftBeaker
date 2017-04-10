@@ -46,12 +46,27 @@ struct APIBlueprintResourceGroup: APIBlueprintCategoryDecodable {
     struct Resource: APIBlueprintElementDecodable {
         static let elementName = "resource"
         let title: String?
+        let attributes: Attributes?
         let transitions: [APIBlueprintTransition]
 
         static func decode(_ e: Extractor) throws -> Resource {
             return try Resource(
                 title: e <|? ["meta", "title"],
+                attributes: e <|? "attributes",
                 transitions: APIBlueprintTransition.decodeElements(e))
+        }
+
+        struct Attributes: Decodable {
+            let href: String?
+            static func decode(_ e: Extractor) throws -> APIBlueprintResourceGroup.Resource.Attributes {
+                return try Attributes(href: e <|? "href")
+            }
+        }
+
+        func href(transition: APIBlueprintTransition, request: APIBlueprintTransition.Transaction.Request) throws -> String {
+            // cascade
+            guard let href = request.href ?? transition.attributes?.href ?? attributes?.href else { throw ConversionError.undefined }
+            return href
         }
     }
 }
@@ -84,24 +99,28 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
 
     let copy: APIBlueprintCopy?
 
-    let attributes: Attributes
+    let attributes: Attributes?
+    func href(request: Transaction.Request) throws -> String {
+        guard let href = request.href ?? attributes?.href else { throw ConversionError.undefined }
+        return href
+    }
     let httpTransactions: [Transaction]
 
     static func decode(_ e: Extractor) throws -> APIBlueprintTransition {
         return try APIBlueprintTransition(
             meta: e <|? "meta",
             copy: APIBlueprintCopy.decodeElementOptional(e),
-            attributes: e <| "attributes",
+            attributes: e <|? "attributes",
             httpTransactions: Transaction.decodeElements(e))
     }
 
     struct Attributes: Decodable {
-        let href: String
+        let href: String?
         let hrefVariables: HrefVariables?
 
         static func decode(_ e: Extractor) throws -> Attributes {
             return try Attributes(
-                href: e <| "href",
+                href: e <|? "href",
                 hrefVariables: HrefVariables.decodeElementOptional(e, key: HrefVariables.elementName))
         }
 
@@ -128,12 +147,14 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
         struct Request: APIBlueprintElementDecodable {
             static let elementName = "httpRequest"
             let method: String
+            let href: String? // nil indicates transition.href should be used
             let headers: Headers?
             let dataStructure: APIBlueprintDataStructure?
 
             static func decode(_ e: Extractor) throws -> Request {
                 return try Request(
                     method:  e <| ["attributes", "method"],
+                    href:  e <|? ["attributes", "href"],
                     headers: e <|? ["attributes", "headers"],
                     dataStructure: {do {return try APIBlueprintDataStructure.decodeElement(e)} catch DecodeError.custom {return nil}}())
             }

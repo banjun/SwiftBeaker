@@ -30,6 +30,7 @@ let preamble = [
     "",
     "enum ResponseError: Error {",
     "    case undefined(Int, String?)",
+    "    case invalidData(Int, String?)",
     "}",
     "",
     "struct RawDataParser: DataParser {",
