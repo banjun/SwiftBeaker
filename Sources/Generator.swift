@@ -32,12 +32,16 @@ fileprivate extension String {
         let cs = CharacterSet(charactersIn: " _/{?,}-")
         return components(separatedBy: cs).joined(separator: "_")
     }
+
+    func docCommentPrefixed() -> String {
+        return components(separatedBy: .newlines).map {"/// " + $0}.joined(separator: "\n")
+    }
 }
 
 extension APIBlueprintDataStructure: SwiftConvertible {
     func swift(_ name: String? = nil) throws -> SwiftCode {
         let localDSTemplate = Template(templateString: ["struct {{ name }} { {% for v in vars %}",
-                                                        "    /// {{ v.doc }}",
+                                                        "    {{ v.doc }}",
                                                         "    var {{ v.name }}: {{ v.type }}{% endfor %}",
                                                         "}\n"].joined(separator: "\n"))
         let globalDSTemplate = Template(templateString: ["extension {{ fqn }}: Decodable {",
@@ -90,7 +94,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                 .flatMap {$0.transaction.responses}
         }
 
-        let trTemplate = Template(templateString: ["/// {{ copy }}",
+        let trTemplate = Template(templateString: ["{{ copy }}",
                                                    "struct {{ name }}: Request {",
                                                    "    typealias Response = {{ response }}",
                                                    "    let baseURL: URL",
@@ -100,7 +104,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                                                    "    static let pathTemplate: URITemplate = \"{{ path }}\"",
                                                    "    var pathVars: PathVars",
                                                    "    struct PathVars {",
-                                                   "{% endif %}        /// {{ v.doc }}",
+                                                   "{% endif %}        {{ v.doc }}",
                                                    "        var {{ v.name }}: {{ v.type }}",
                                                    "{% if forloop.last %}    }",
                                                    "{% endif %}{% empty %}",
@@ -118,7 +122,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                                                    "    var headerFields: [String: String] {return headerVars.context as? [String: String] ?? [:]}",
                                                    "    var headerVars: HeaderVars",
                                                    "    struct HeaderVars {",
-                                                   "{% for v in headerVars %}       /// {{ v.doc }}",
+                                                   "{% for v in headerVars %}       {{ v.doc }}",
                                                    "        var {{ v.name }}: {{ v.type }}",
                                                    "{% endfor %}",
                                                    "    }",
@@ -228,7 +232,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                 ["key": k,
                  "name": k.lowercased().swiftIdentifierized(),
                  "type": "String",
-                 "doc": v]
+                 "doc": v.docCommentPrefixed()]
             }
             context["headerVars"] = headerVars
             globalExtensionCode += try globalPathVarsTemplate.render([
@@ -255,7 +259,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                 context["paramContentType"] = requestContentType
             }
         }
-        context["copy"] = copy?.text
+        context["copy"] = copy?.text.docCommentPrefixed()
 
         return try (local: trTemplate.render(context), global: globalExtensionCode)
     }
@@ -282,5 +286,8 @@ extension APIBlueprintMember {
         }
         return name + (required ? "" : "?")
     }
-    var swiftDoc: String {return [meta?.description, content.displayValue.map {" ex. " + $0}].flatMap {$0}.joined(separator: " ")}
+    var swiftDoc: String {return [meta?.description, content.displayValue.map {" ex. " + $0}]
+        .flatMap {$0}
+        .joined(separator: " ")
+        .docCommentPrefixed()}
 }

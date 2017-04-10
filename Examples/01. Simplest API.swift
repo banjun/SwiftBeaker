@@ -51,7 +51,7 @@ struct TextBodyParameters: BodyParameters {
 
 // MARK: - Transitions
 
-/// 
+
 struct GET__message: Request {
     typealias Response = Responses
     let baseURL: URL
