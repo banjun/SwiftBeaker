@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
   s.source           = { :git => 'https://github.com/banjun/SwiftBeaker.git', :tag => s.version.to_s }
   s.social_media_url = 'https://twitter.com/banjun'
   s.ios.deployment_target = '9.0'
-  #s.source_files = 'SwiftBeaker/Classes/**/*'
+  s.source_files = 'SwiftBeaker/Pod/Classes/**/*'
   s.dependency 'APIKit'
   s.dependency 'Himotoki'
   s.dependency 'URITemplate'

@@ -26,7 +26,7 @@ extension URITemplateContextConvertible {
 }
 
 enum RequestError: Error {
-   case encode
+    case encode
 }
 
 enum ResponseError: Error {
@@ -40,40 +40,25 @@ struct RawDataParser: DataParser {
 }
 
 struct TextBodyParameters: BodyParameters {
-   let contentType: String
-   let content: String
-   func buildEntity() throws -> RequestBodyEntity {
-       guard let r = content.data(using: .utf8) else { throw RequestError.encode }
-       return .data(r)
-   }
+    let contentType: String
+    let content: String
+    func buildEntity() throws -> RequestBodyEntity {
+        guard let r = content.data(using: .utf8) else { throw RequestError.encode }
+        return .data(r)
+    }
 }
 
-
-// MARK: - Transitions
-
-/// Here we define an action using the `GET` [HTTP request method](http://www.w3schools.com/tags/ref_httpmethods.asp) for our resource `/message`.
-/// 
-/// As with every good action it should return a
-/// [response](http://www.w3.org/TR/di-gloss/#def-http-response). A response always
-/// bears a status code. Code 200 is great as it means all is green. Responding
-/// with some data can be a great idea as well so let's add a plain text message to
-/// our response.
-struct GET__message: Request {
-    typealias Response = Responses
-    let baseURL: URL
-    var method: HTTPMethod {return .get}
-
-    var path: String {return "/message"}
+protocol APIBlueprintRequest: Request {}
+extension APIBlueprintRequest {
     var dataParser: DataParser {return RawDataParser()}
 
-    enum Responses {
-        case http200_text_plain(String)
+    func contentMIMEType(in urlResponse: HTTPURLResponse) -> String? {
+        return (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
     }
 
-
-    // conver object (Data) to expected type
+    // convert object (Data) to expected type
     func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+        let contentType = contentMIMEType(in: urlResponse)
         switch (object, contentType) {
         case let (data as Data, "application/json"?): return try JSONSerialization.jsonObject(with: data, options: [])
         case let (data as Data, "text/plain"?):
@@ -86,9 +71,44 @@ struct GET__message: Request {
         default: return object
         }
     }
+}
 
-    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Response {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+protocol URITemplateRequest: Request {
+    static var pathTemplate: URITemplate { get }
+    associatedtype PathVars: URITemplateContextConvertible
+    var pathVars: PathVars { get }
+}
+extension URITemplateRequest {
+    // reconstruct URL to use URITemplate.expand. NOTE: APIKit does not support URITemplate format other than `path + query`
+    func intercept(urlRequest: URLRequest) throws -> URLRequest {
+        var req = urlRequest
+        req.url = URL(string: baseURL.absoluteString + type(of: self).pathTemplate.expand(pathVars.context))!
+        return req
+    }
+}
+
+
+// MARK: - Transitions
+
+/// Here we define an action using the `GET` [HTTP request method](http://www.w3schools.com/tags/ref_httpmethods.asp) for our resource `/message`.
+/// 
+/// As with every good action it should return a
+/// [response](http://www.w3.org/TR/di-gloss/#def-http-response). A response always
+/// bears a status code. Code 200 is great as it means all is green. Responding
+/// with some data can be a great idea as well so let's add a plain text message to
+/// our response.
+struct GET__message: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .get}
+
+    var path: String {return "/message"}
+
+    enum Responses {
+        case http200_text_plain(String)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
         case (200, "text/plain"?):
             return .http200_text_plain(try String.decodeValue(object))
@@ -103,13 +123,11 @@ struct GET__message: Request {
 /// [request](http://www.w3.org/TR/di-gloss/#def-http-request) and then send a
 /// response back confirming the posting was a success (_HTTP Status Code 204 ~
 /// Resource updated successfully, no content is returned_).
-struct PUT__message: Request {
-    typealias Response = Responses
+struct PUT__message: APIBlueprintRequest {
     let baseURL: URL
     var method: HTTPMethod {return .put}
 
     var path: String {return "/message"}
-    var dataParser: DataParser {return RawDataParser()}
 
     let param: String
     var bodyParameters: BodyParameters? {return TextBodyParameters(contentType: "text/plain", content: param)}
@@ -117,25 +135,8 @@ struct PUT__message: Request {
         case http204_(Void)
     }
 
-
-    // conver object (Data) to expected type
-    func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
-        switch (object, contentType) {
-        case let (data as Data, "application/json"?): return try JSONSerialization.jsonObject(with: data, options: [])
-        case let (data as Data, "text/plain"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, "text/html"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, _): return data
-        default: return object
-        }
-    }
-
-    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Response {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
         case (204, _):
             return .http204_()

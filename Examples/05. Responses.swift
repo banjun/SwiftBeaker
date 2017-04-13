@@ -26,7 +26,7 @@ extension URITemplateContextConvertible {
 }
 
 enum RequestError: Error {
-   case encode
+    case encode
 }
 
 enum ResponseError: Error {
@@ -40,40 +40,25 @@ struct RawDataParser: DataParser {
 }
 
 struct TextBodyParameters: BodyParameters {
-   let contentType: String
-   let content: String
-   func buildEntity() throws -> RequestBodyEntity {
-       guard let r = content.data(using: .utf8) else { throw RequestError.encode }
-       return .data(r)
-   }
+    let contentType: String
+    let content: String
+    func buildEntity() throws -> RequestBodyEntity {
+        guard let r = content.data(using: .utf8) else { throw RequestError.encode }
+        return .data(r)
+    }
 }
 
-
-// MARK: - Transitions
-
-/// This action has **two** responses defined: One returning plain text and the
-/// other a JSON representation of our resource. Both have the same HTTP status
-/// code. Also both responses bear additional information in the form of a custom
-/// HTTP header. Note that both responses have set the `Content-Type` HTTP header
-/// just by specifying `(text/plain)` or `(application/json)` in their respective
-/// signatures.
-struct Retrieve_a_Message: Request {
-    typealias Response = Responses
-    let baseURL: URL
-    var method: HTTPMethod {return .get}
-
-    var path: String {return "/message"}
+protocol APIBlueprintRequest: Request {}
+extension APIBlueprintRequest {
     var dataParser: DataParser {return RawDataParser()}
 
-    enum Responses {
-        case http200_text_plain(String)
-        case http200_application_json(Void)
+    func contentMIMEType(in urlResponse: HTTPURLResponse) -> String? {
+        return (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
     }
 
-
-    // conver object (Data) to expected type
+    // convert object (Data) to expected type
     func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+        let contentType = contentMIMEType(in: urlResponse)
         switch (object, contentType) {
         case let (data as Data, "application/json"?): return try JSONSerialization.jsonObject(with: data, options: [])
         case let (data as Data, "text/plain"?):
@@ -86,9 +71,44 @@ struct Retrieve_a_Message: Request {
         default: return object
         }
     }
+}
 
-    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Response {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+protocol URITemplateRequest: Request {
+    static var pathTemplate: URITemplate { get }
+    associatedtype PathVars: URITemplateContextConvertible
+    var pathVars: PathVars { get }
+}
+extension URITemplateRequest {
+    // reconstruct URL to use URITemplate.expand. NOTE: APIKit does not support URITemplate format other than `path + query`
+    func intercept(urlRequest: URLRequest) throws -> URLRequest {
+        var req = urlRequest
+        req.url = URL(string: baseURL.absoluteString + type(of: self).pathTemplate.expand(pathVars.context))!
+        return req
+    }
+}
+
+
+// MARK: - Transitions
+
+/// This action has **two** responses defined: One returning plain text and the
+/// other a JSON representation of our resource. Both have the same HTTP status
+/// code. Also both responses bear additional information in the form of a custom
+/// HTTP header. Note that both responses have set the `Content-Type` HTTP header
+/// just by specifying `(text/plain)` or `(application/json)` in their respective
+/// signatures.
+struct Retrieve_a_Message: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .get}
+
+    var path: String {return "/message"}
+
+    enum Responses {
+        case http200_text_plain(String)
+        case http200_application_json(Void)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
         case (200, "text/plain"?):
             return .http200_text_plain(try String.decodeValue(object))
@@ -101,13 +121,11 @@ struct Retrieve_a_Message: Request {
 }
 
 
-struct Update_a_Message: Request {
-    typealias Response = Responses
+struct Update_a_Message: APIBlueprintRequest {
     let baseURL: URL
     var method: HTTPMethod {return .put}
 
     var path: String {return "/message"}
-    var dataParser: DataParser {return RawDataParser()}
 
     let param: String
     var bodyParameters: BodyParameters? {return TextBodyParameters(contentType: "text/plain", content: param)}
@@ -115,25 +133,8 @@ struct Update_a_Message: Request {
         case http204_(Void)
     }
 
-
-    // conver object (Data) to expected type
-    func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
-        switch (object, contentType) {
-        case let (data as Data, "application/json"?): return try JSONSerialization.jsonObject(with: data, options: [])
-        case let (data as Data, "text/plain"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, "text/html"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, _): return data
-        default: return object
-        }
-    }
-
-    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Response {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
         case (204, _):
             return .http204_()

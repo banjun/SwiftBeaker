@@ -95,8 +95,7 @@ extension APIBlueprintTransition: SwiftConvertible {
         }
 
         let trTemplate = Template(templateString: ["{{ copy }}",
-                                                   "struct {{ name }}: Request {",
-                                                   "    typealias Response = {{ response }}",
+                                                   "struct {{ name }}: {{ extensions|join:\", \" }} {",
                                                    "    let baseURL: URL",
                                                    "    var method: HTTPMethod {return {{ method }}}",
                                                    "{% for v in pathVars %}{% if forloop.first %}",
@@ -106,14 +105,11 @@ extension APIBlueprintTransition: SwiftConvertible {
                                                    "    struct PathVars {",
                                                    "{% endif %}        {{ v.doc }}",
                                                    "        var {{ v.name }}: {{ v.type }}",
-                                                   "{% if forloop.last %}    }",
-                                                   "{% endif %}{% empty %}",
+                                                   "{% if forloop.last %}    }{% endif %}{% empty %}",
                                                    "    var path: String {return \"{{ path }}\"}{% endfor %}",
-                                                   "    var dataParser: DataParser {return RawDataParser()}",
                                                    "{% if paramType %}",
                                                    "    let param: {{ paramType }}",
-                                                   "    var bodyParameters: BodyParameters? {return {% if paramType == \"String\" %}TextBodyParameters(contentType: \"{{ paramContentType }}\", content: param){% else %}param.jsonBodyParameters{% endif %}}{% endif %}{% if structParam %}",
-                                                   "{{ structParam }}{% endif %}",
+                                                   "    var bodyParameters: BodyParameters? {return {% if paramType == \"String\" %}TextBodyParameters(contentType: \"{{ paramContentType }}\", content: param){% else %}param.jsonBodyParameters{% endif %}}{% endif %}{% if structParam %}{{ structParam }}{% endif %}",
                                                    "    enum Responses {",
                                                    "{% for r in responseCases %}        case {{ r.case }}({{ r.type }}){% if r.innerType %}",
                                                    "{{ r.innerType }}{% endif %}",
@@ -127,32 +123,8 @@ extension APIBlueprintTransition: SwiftConvertible {
                                                    "{% endfor %}",
                                                    "    }",
                                                    "{% endif %}",
-                                                   "{% if pathVars %}",
-                                                   "    // reconstruct URL to use URITemplate.expand. NOTE: APIKit does not support URITemplate format other than `path + query`",
-                                                   "    func intercept(urlRequest: URLRequest) throws -> URLRequest {",
-                                                   "        var req = urlRequest",
-                                                   "        req.url = URL(string: baseURL.absoluteString + {{ name }}.pathTemplate.expand(pathVars.context))!",
-                                                   "        return req",
-                                                   "    }",
-                                                   "{% endif %}",
-                                                   "    // conver object (Data) to expected type",
-                                                   "    func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {",
-                                                   "        let contentType = (urlResponse.allHeaderFields[\"Content-Type\"] as? String)?.components(separatedBy: \";\").first?.trimmingCharacters(in: .whitespaces)",
-                                                   "        switch (object, contentType) {",
-                                                   "        case let (data as Data, \"application/json\"?): return try JSONSerialization.jsonObject(with: data, options: [])",
-                                                   "        case let (data as Data, \"text/plain\"?):",
-                                                   "            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }",
-                                                   "            return s",
-                                                   "        case let (data as Data, \"text/html\"?):",
-                                                   "            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }",
-                                                   "            return s",
-                                                   "        case let (data as Data, _): return data",
-                                                   "        default: return object",
-                                                   "        }",
-                                                   "    }",
-                                                   "",
-                                                   "    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Response {",
-                                                   "        let contentType = (urlResponse.allHeaderFields[\"Content-Type\"] as? String)?.components(separatedBy: \";\").first?.trimmingCharacters(in: .whitespaces)",
+                                                   "    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {",
+                                                   "        let contentType = contentMIMEType(in: urlResponse)",
                                                    "        switch (urlResponse.statusCode, contentType) {",
                                                    "{% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):",
                                                    "            return .{{ r.case }}({% if r.type != \"Void\" %}try {% if r.innerType %}Responses.{% endif %}{{ r.type }}.decodeValue(object){% endif %})",
@@ -209,7 +181,6 @@ extension APIBlueprintTransition: SwiftConvertible {
 
         var context: [String: Any] = [
             "name": requestTypeName,
-            "response": "Responses",
             "responseCases": responseCases,
             "method": "." + request.method.lowercased(),
             "path": href
@@ -222,10 +193,13 @@ extension APIBlueprintTransition: SwiftConvertible {
                  "doc": $0.swiftDoc,
                  "optional": !$0.required]
             }
+            context["extensions"] = ["APIBlueprintRequest", "URITemplateRequest"]
             context["pathVars"] = pathVars
             globalExtensionCode += try globalPathVarsTemplate.render([
                 "fqn": [requestTypeName, "PathVars"].joined(separator: "."),
                 "vars": pathVars])
+        } else {
+            context["extensions"] = ["APIBlueprintRequest"]
         }
         if let headers = request.headers?.dictionary, !headers.isEmpty {
             let headerVars = headers.map { (k, v) in

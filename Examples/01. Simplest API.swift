@@ -26,7 +26,7 @@ extension URITemplateContextConvertible {
 }
 
 enum RequestError: Error {
-   case encode
+    case encode
 }
 
 enum ResponseError: Error {
@@ -40,34 +40,25 @@ struct RawDataParser: DataParser {
 }
 
 struct TextBodyParameters: BodyParameters {
-   let contentType: String
-   let content: String
-   func buildEntity() throws -> RequestBodyEntity {
-       guard let r = content.data(using: .utf8) else { throw RequestError.encode }
-       return .data(r)
-   }
+    let contentType: String
+    let content: String
+    func buildEntity() throws -> RequestBodyEntity {
+        guard let r = content.data(using: .utf8) else { throw RequestError.encode }
+        return .data(r)
+    }
 }
 
-
-// MARK: - Transitions
-
-
-struct GET__message: Request {
-    typealias Response = Responses
-    let baseURL: URL
-    var method: HTTPMethod {return .get}
-
-    var path: String {return "/message"}
+protocol APIBlueprintRequest: Request {}
+extension APIBlueprintRequest {
     var dataParser: DataParser {return RawDataParser()}
 
-    enum Responses {
-        case http200_text_plain(String)
+    func contentMIMEType(in urlResponse: HTTPURLResponse) -> String? {
+        return (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
     }
 
-
-    // conver object (Data) to expected type
+    // convert object (Data) to expected type
     func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+        let contentType = contentMIMEType(in: urlResponse)
         switch (object, contentType) {
         case let (data as Data, "application/json"?): return try JSONSerialization.jsonObject(with: data, options: [])
         case let (data as Data, "text/plain"?):
@@ -80,9 +71,38 @@ struct GET__message: Request {
         default: return object
         }
     }
+}
 
-    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Response {
-        let contentType = (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
+protocol URITemplateRequest: Request {
+    static var pathTemplate: URITemplate { get }
+    associatedtype PathVars: URITemplateContextConvertible
+    var pathVars: PathVars { get }
+}
+extension URITemplateRequest {
+    // reconstruct URL to use URITemplate.expand. NOTE: APIKit does not support URITemplate format other than `path + query`
+    func intercept(urlRequest: URLRequest) throws -> URLRequest {
+        var req = urlRequest
+        req.url = URL(string: baseURL.absoluteString + type(of: self).pathTemplate.expand(pathVars.context))!
+        return req
+    }
+}
+
+
+// MARK: - Transitions
+
+
+struct GET__message: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .get}
+
+    var path: String {return "/message"}
+
+    enum Responses {
+        case http200_text_plain(String)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
         case (200, "text/plain"?):
             return .http200_text_plain(try String.decodeValue(object))
