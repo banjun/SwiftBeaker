@@ -38,12 +38,24 @@ fileprivate extension String {
     }
 }
 
+private let stencilExtension: Extension = {
+    let ext = Extension()
+    ext.registerFilter("escapeKeyword") { (value: Any?) in
+        let keywords = ["var", "let", "where", "operator", "throws"]
+        guard let s = value as? String,
+            keywords.contains(s) else { return value }
+        return "`" + s + "`"
+    }
+    return ext
+}()
+private let stencilEnvironment = Environment(extensions: [stencilExtension])
+
 extension APIBlueprintDataStructure: SwiftConvertible {
     func swift(_ name: String? = nil) throws -> SwiftCode {
         let localDSTemplate = Template(templateString: ["struct {{ name }} { {% for v in vars %}",
                                                         "    {{ v.doc }}",
-                                                        "    var {{ v.name }}: {{ v.type }}{% endfor %}",
-                                                        "}\n"].joined(separator: "\n"))
+                                                        "    var {{ v.name|escapeKeyword }}: {{ v.type }}{% endfor %}",
+                                                        "}\n"].joined(separator: "\n"), environment: stencilEnvironment)
         let globalDSTemplate = Template(templateString: ["extension {{ fqn }}: Decodable {",
                                                          "    static func decode(_ e: Extractor) throws -> {{ fqn }} {",
                                                          "        return try self.init({% for v in vars %}",
@@ -54,9 +66,9 @@ extension APIBlueprintDataStructure: SwiftConvertible {
                                                          "extension {{ fqn }}: DataStructureType {",
                                                          "    var jsonBodyParametersObject: Any {",
                                                          "        var j: [String: Any] = [:]",
-                                                         "{% for v in vars %}        j[\"{{ v.name }}\"] = {{ v.name }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j",
+                                                         "{% for v in vars %}        j[\"{{ v.name }}\"] = {{ v.name|escapeKeyword }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j",
                                                          "    }",
-                                                         "}\n"].joined(separator: "\n"))
+                                                         "}\n"].joined(separator: "\n"), environment: stencilEnvironment)
 
         guard let name = ((name ?? id).map {$0.swiftKeywordsEscaped()}) else { throw ConversionError.undefined }
         let vars: [[String: Any]] = members.map { m in
