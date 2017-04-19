@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'SwiftBeaker'
-  s.version          = '0.4.0'
+  s.version          = '0.4.1'
   s.summary          = 'Swift client generator for API Blueprint'
   s.description      = <<-DESC
   SwiftBeaker is a Swift client generator for API Blueprint.
