@@ -3,14 +3,14 @@ import Himotoki
 import Stencil
 
 struct Core {
-    static func main(file: String) throws {
+    static func main(file: String, public: Bool) throws {
         let j = try JSONSerialization.jsonObject(with: try Data(contentsOf: URL(fileURLWithPath: file)), options: [])
         let ast = try APIBlueprintAST.decodeValue(j)
         let resources = ast.api.resourceGroup.flatMap {$0.resources}
         let transitionsSwift = try resources.flatMap { r in
-            try r.transitions.map {try $0.swift(r)}
+            try r.transitions.map {try $0.swift(r, public: `public`)}
         }
-        let dataStructuresSwift = try ast.api.dataStructures.map {try $0.swift()}
+        let dataStructuresSwift = try ast.api.dataStructures.map {try $0.swift(public: `public`)}
 
         print(preamble)
         print("\n// MARK: - Transitions\n")
