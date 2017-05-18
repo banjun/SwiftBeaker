@@ -31,6 +31,12 @@ release ([SwiftBeaker/releases](https://github.com/banjun/SwiftBeaker/releases))
 % SwiftBeaker apib.json > APIClient.swift
 ```
 
+for use in a framework target for the API:
+
+```sh
+% SwiftBeaker --public apib.json > APIClient.swift # public memberwise init & public members
+```
+
 ## Conversion
 
 SwiftBeaker converts ...
