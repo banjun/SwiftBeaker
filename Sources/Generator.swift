@@ -158,7 +158,7 @@ extension APIBlueprintTransition: SwiftConvertible {
         }
     }
 }
-""", environment: stencilEnvironment)
+""", environment: stencilEnvironment) // TODO: enum CodingKeys for non swift identifiable keys, TODO: no decode for text/html
         let siblingResponses = try allResponses(method: request.method)
         let responseCases = try siblingResponses.map { r -> [String: Any] in
             let type: String
