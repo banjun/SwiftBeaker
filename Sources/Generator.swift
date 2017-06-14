@@ -53,7 +53,7 @@ private let stencilEnvironment = Environment(extensions: [stencilExtension])
 extension APIBlueprintDataStructure: SwiftConvertible {
     func swift(_ name: String? = nil, public: Bool) throws -> SwiftCode {
         let localDSTemplate = Template(templateString: """
-{{ public }}struct {{ name }} { {% for v in vars %}
+{{ public }}struct {{ name }}: Codable { {% for v in vars %}
     {{ v.doc }}
     {{ public }}var {{ v.name|escapeKeyword }}: {{ v.type }}{% endfor %}{% if publicMemberwiseInit %}
 
@@ -63,22 +63,6 @@ extension APIBlueprintDataStructure: SwiftConvertible {
     {% endfor %}}{% endif %}
 }
 """, environment: stencilEnvironment)
-        let globalDSTemplate = Template(templateString: """
-extension {{ fqn }}: Decodable {
-    {{ public }}static func decode(_ e: Extractor) throws -> {{ fqn }} {
-        return try self.init({% for v in vars %}
-            {{ v.name }}: e {{ v.decoder }} "{{ v.name }}"{% if not forloop.last %},{% endif %}{% endfor %}
-        )
-    }
-}
-extension {{ fqn }}: DataStructureType {
-    {{ public }}var jsonBodyParametersObject: Any {
-        var j: [String: Any] = [:]
-{% for v in vars %}        j["{{ v.name }}"] = {{ v.name|escapeKeyword }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j
-    }
-}
-""", environment: stencilEnvironment)
-
         guard let name = ((name ?? id).map {$0.swiftKeywordsEscaped()}) else { throw ConversionError.undefined }
         let vars: [[String: Any]] = members.map { m in
             let optional = !m.required
@@ -95,10 +79,7 @@ extension {{ fqn }}: DataStructureType {
                                                    "publicMemberwiseInit": `public`,
                                                    "name": localName.swiftIdentifierized(),
                                                    "vars": vars]),
-                global: try globalDSTemplate.render(["public": `public` ? "public " : "",
-                                                     "name": localName.swiftIdentifierized(),
-                                                     "fqn": name.components(separatedBy: ".").map {$0.swiftIdentifierized()}.joined(separator: "."),
-                                                     "vars": vars]))
+                global: "")
     }
 }
 
@@ -127,7 +108,7 @@ extension APIBlueprintTransition: SwiftConvertible {
     {{ public }}let path = "" // see intercept(urlRequest:)
     static let pathTemplate: URITemplate = "{{ path }}"
     {{ public }}var pathVars: PathVars
-    {{ public }}struct PathVars {
+    {{ public }}struct PathVars: URITemplateContextConvertible {
 {% endif %}        {{ v.doc }}
         {{ public }}var {{ v.name }}: {{ v.type }}{% if forloop.last %}{% if publicMemberwiseInit %}
 
@@ -139,15 +120,20 @@ extension APIBlueprintTransition: SwiftConvertible {
     {{ public }}var path: String {return "{{ path }}"}{% endfor %}
 {% if paramType %}
     {{ public }}let param: {{ paramType }}
-    {{ public }}var bodyParameters: BodyParameters? {return {% if paramType == "String" %}TextBodyParameters(contentType: "{{ paramContentType }}", content: param){% else %}param.jsonBodyParameters{% endif %}}{% endif %}{% if structParam %}{{ structParam }}{% endif %}
+    {{ public }}var bodyParameters: BodyParameters? {% if paramType == "String" %}{return TextBodyParameters(contentType: "{{ paramContentType }}", content: param)}{% else %}{
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? JSONBodyParameters(JSONObject: JSONSerialization.jsonObject(with: encoder.encode(param)))
+    }
+{% endif %}{% endif %}{% if structParam %}{{ structParam }}{% endif %}
     {{ public }}enum Responses {
 {% for r in responseCases %}        case {{ r.case }}({{ r.type }}){% if r.innerType %}
 {{ r.innerType }}{% endif %}
 {% endfor %}    }
 {% if headerVars %}
-    {{ public }}var headerFields: [String: String] {return headerVars.context as? [String: String] ?? [:]}
+    {{ public }}var headerFields: [String: String] {return headerVars.context}
     {{ public }}var headerVars: HeaderVars
-    {{ public }}struct HeaderVars {
+    {{ public }}struct HeaderVars: URITemplateContextConvertible {
 {% for v in headerVars %}       {{ v.doc }}
         {{ public }}var {{ v.name }}: {{ v.type }}
 {% endfor %}{% if publicMemberwiseInit %}
@@ -166,23 +152,13 @@ extension APIBlueprintTransition: SwiftConvertible {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
 {% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):
-            return .{{ r.case }}({% if r.type != "Void" %}try {% if r.innerType %}Responses.{% endif %}{{ r.type }}.decodeValue(object){% endif %})
+            return .{{ r.case }}({% if r.type != "Void" %}try JSONDecoder().decode({% if r.innerType %}Responses.{% endif %}{{ r.type }}.self, from: object as! Data){% endif %})
 {% endfor %}        default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
     }
 }
 """, environment: stencilEnvironment)
-        // FIXME: rename protocol name
-        let globalPathVarsTemplate = Template(templateString: """
-extension {{ fqn }}: URITemplateContextConvertible {
-    var jsonBodyParametersObject: Any {
-        var j: [String: Any] = [:]
-{% for v in vars %}        j["{{ v.key }}"] = {{ v.name }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j
-    }
-}
-""")
-
         let siblingResponses = try allResponses(method: request.method)
         let responseCases = try siblingResponses.map { r -> [String: Any] in
             let type: String
@@ -239,9 +215,6 @@ extension {{ fqn }}: URITemplateContextConvertible {
             }
             context["extensions"] = ["APIBlueprintRequest", "URITemplateRequest"]
             context["pathVars"] = pathVars
-            globalExtensionCode += try globalPathVarsTemplate.render([
-                "fqn": [requestTypeName, "PathVars"].joined(separator: "."),
-                "vars": pathVars])
         } else {
             context["extensions"] = ["APIBlueprintRequest"]
         }
@@ -253,9 +226,6 @@ extension {{ fqn }}: URITemplateContextConvertible {
                  "doc": v.docCommentPrefixed()]
             }
             context["headerVars"] = headerVars
-            globalExtensionCode += try globalPathVarsTemplate.render([
-                "fqn": [requestTypeName, "HeaderVars"].joined(separator: "."),
-                "vars": headerVars])
         }
         switch request.dataStructure {
         case let .anonymous(members)?:

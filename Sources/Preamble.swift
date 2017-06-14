@@ -3,29 +3,13 @@
 let preamble = """
 import Foundation
 import APIKit
-import Himotoki
 import URITemplate
 
-protocol JSONBodyParametersConvertible {
-    var jsonBodyParametersObject: Any { get }
-}
-extension JSONBodyParametersConvertible {
-    var jsonBodyParameters: JSONBodyParameters {return JSONBodyParameters(JSONObject: jsonBodyParametersObject)}
-    var jsonBodyParametersObject: Any {return self} // default implementation
-}
-
-extension String: JSONBodyParametersConvertible {}
-extension Int: JSONBodyParametersConvertible {}
-extension Bool: JSONBodyParametersConvertible {}
-
-protocol DataStructureType: JSONBodyParametersConvertible {}
-extension Array where Element: JSONBodyParametersConvertible {
-    var jsonBodyParametersObject: Any {return self.map {$0.jsonBodyParametersObject}}
-}
-
-protocol URITemplateContextConvertible: JSONBodyParametersConvertible {}
+protocol URITemplateContextConvertible: Encodable {}
 extension URITemplateContextConvertible {
-    var context: [String: Any] {return jsonBodyParametersObject as? [String: Any] ?? [:]}
+    var context: [String: String] {
+        return ((try? JSONSerialization.jsonObject(with: JSONEncoder().encode(self))) as? [String: String]) ?? [:]
+    }
 }
 
 public enum RequestError: Error {
@@ -63,7 +47,7 @@ extension APIBlueprintRequest {
     public func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
         let contentType = contentMIMEType(in: urlResponse)
         switch (object, contentType) {
-        case let (data as Data, "application/json"?): return try JSONSerialization.jsonObject(with: data, options: [])
+        case let (data as Data, "application/json"?): return data
         case let (data as Data, "text/plain"?):
             guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
             return s
