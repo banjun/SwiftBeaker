@@ -113,7 +113,7 @@ extension APIBlueprintTransition: SwiftConvertible {
     {{ public }}var pathVars: PathVars
     {{ public }}struct PathVars: URITemplateContextConvertible {
 {% endif %}        {{ v.doc }}
-        {{ public }}var {{ v.name }}: {{ v.type }}{% if forloop.last %}{% if publicMemberwiseInit %}
+        {{ public }}var {{ v.name|escapeKeyword }}: {{ v.type }}{% if forloop.last %}{% if publicMemberwiseInit %}
 
         // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}
         public init({% for v in pathVars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {
