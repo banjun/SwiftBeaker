@@ -73,4 +73,23 @@ extension URITemplateRequest {
         return req
     }
 }
+
+/// indirect Codable Box-like container for recursive data structure definitions
+public class Indirect<V: Codable>: Codable {
+    public var value: V
+
+    public init(_ value: V) {
+        self.value = value
+    }
+
+    public required init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.value = try container.decode(V.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(value)
+    }
+}
 """

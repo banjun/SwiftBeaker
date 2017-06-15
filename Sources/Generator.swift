@@ -64,15 +64,18 @@ extension APIBlueprintDataStructure: SwiftConvertible {
 }
 """, environment: stencilEnvironment)
         guard let name = ((name ?? id).map {$0.swiftKeywordsEscaped()}) else { throw ConversionError.undefined }
-        let vars: [[String: Any]] = members.map { m in
-            let optional = !m.required
-            let optionalSuffix = optional ? "?" : ""
-            return [
-                "name": m.swiftName,
-                "type": m.swiftType,
-                "optional": optional,
-                "doc": m.swiftDoc,
-                "decoder": (m.content.type.isArray ? "<||" : "<|") + optionalSuffix]}
+        let vars: [[String: Any]] = try members
+            .map {try $0.memberAvoidingSwiftRecursiveStruct(parentTypes: [name])}
+            .map { m in
+                let optional = !m.required
+                let optionalSuffix = optional ? "?" : ""
+
+                return [
+                    "name": m.swiftName,
+                    "type": m.swiftType,
+                    "optional": optional,
+                    "doc": m.swiftDoc,
+                    "decoder": (m.content.type.isArray ? "<||" : "<|") + optionalSuffix]}
 
         let localName = name.components(separatedBy: ".").last ?? name
         return (local: try localDSTemplate.render(["public": `public` ? "public " : "",
@@ -271,6 +274,8 @@ extension APIBlueprintMember {
             name = t.swiftTypeMapped().swiftKeywordsEscaped()
         case let .array(t):
             name = "[" + (t.map {$0.swiftTypeMapped().swiftKeywordsEscaped()} ?? "Any") + "]"
+        case let .indirect(t):
+            name = "Indirect<\(t)>"
         }
         return name + (required ? "" : "?")
     }
@@ -278,4 +283,23 @@ extension APIBlueprintMember {
         .flatMap {$0}
         .joined(separator: " ")
         .docCommentPrefixed()}
+
+    func memberAvoidingSwiftRecursiveStruct(parentTypes: [String]) throws -> APIBlueprintMember {
+        let recursive = parentTypes.contains {
+            if case .exact($0) = content.type { return true } // currently support simple recursions
+            return false
+        }
+        guard recursive else { return self }
+        guard !required else {
+            throw ConversionError.notSupported("recursive data structure with required param")
+        }
+        guard case let .exact(exactType) = content.type else {
+            throw ConversionError.notSupported("recursive data structure with compound param")
+        }
+
+        return APIBlueprintMember(
+            meta: meta,
+            typeAttributes: typeAttributes?.filter {$0 != "required"},
+            content: APIBlueprintMemberContent(name: content.name, type: .indirect(exactType), value: content.value, displayValue: content.displayValue))
+    }
 }

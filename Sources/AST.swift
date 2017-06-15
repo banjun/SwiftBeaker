@@ -276,6 +276,8 @@ struct APIBlueprintMemberContent: Himotoki.Decodable {
             displayValue = "[" + contents.map {"\"" + $0.value + "\""}.joined(separator: ", ") + "]"
         case .exact("enum"):
             throw ConversionError.notSupported("\(type) at \(self)")
+        case .indirect:
+            throw ConversionError.undefined
         case let .exact(id):
             value = id
             displayValue = value
@@ -300,11 +302,13 @@ struct APIBlueprintMemberContent: Himotoki.Decodable {
 enum APIBlueprintMemberType: Himotoki.Decodable {
     case exact(String)
     case array(String?)
+    case indirect(String)
 
     var isArray: Bool {
         switch self {
         case .exact: return false
         case .array: return true
+        case .indirect: return false
         }
     }
 
