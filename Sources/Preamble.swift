@@ -83,13 +83,11 @@ public class Indirect<V: Codable>: Codable {
     }
 
     public required init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        self.value = try container.decode(V.self)
+        self.value = try V(from: decoder)
     }
 
     public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(value)
+        try value.encode(to: encoder)
     }
 }
 """
