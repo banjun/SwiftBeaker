@@ -137,9 +137,12 @@ extension APIBlueprintTransition: SwiftConvertible {
     {{ public }}var headerFields: [String: String] {return headerVars.context}
     {{ public }}var headerVars: HeaderVars
     {{ public }}struct HeaderVars: URITemplateContextConvertible {
-{% for v in headerVars %}       {{ v.doc }}
+{% for v in headerVars %}        {{ v.doc }}
         {{ public }}var {{ v.name }}: {{ v.type }}
-{% endfor %}{% if publicMemberwiseInit %}
+{% endfor %}
+        enum CodingKeys: String, CodingKey {
+{% for v in headerVars %}            case {{ v.name }} = "{{ v.key }}"
+{% endfor %}        }{% if publicMemberwiseInit %}
         // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}
         public init({% for v in headerVars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {
         {% for v in headerVars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}
