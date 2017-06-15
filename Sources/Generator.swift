@@ -119,7 +119,8 @@ extension APIBlueprintTransition: SwiftConvertible {
         public init({% for v in pathVars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {
         {% for v in pathVars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}
         {% endfor %}}{% endif %}
-    }{% endif %}{% empty %}
+    }{% else %}
+{% endif %}{% empty %}
     {{ public }}var path: String {return "{{ path }}"}{% endfor %}
 {% if paramType %}
     {{ public }}let param: {{ paramType }}
