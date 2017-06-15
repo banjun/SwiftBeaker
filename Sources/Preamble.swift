@@ -56,6 +56,10 @@ extension APIBlueprintRequest {
         }
         return s
     }
+
+    func decodeJSON<T: Decodable>(from object: Any, urlResponse: HTTPURLResponse) throws -> T {
+        return try JSONDecoder().decode(T.self, from: data(from: object, urlResponse: urlResponse))
+    }
 }
 
 protocol URITemplateRequest: Request {

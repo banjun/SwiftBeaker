@@ -199,7 +199,7 @@ extension APIBlueprintTransition: SwiftConvertible {
                 "decode": {
                     switch r.contentType {
                     case nil, "application/json"?:
-                        return "try JSONDecoder().decode(\(innerType.map {_ in "Responses." + type} ?? type).self, from: data(from: object, urlResponse: urlResponse))"
+                        return "try decodeJSON(from: object, urlResponse: urlResponse)"
                     case "text/html"?, "text/plain"?:
                         return "try string(from: object, urlResponse: urlResponse)"
                     default:
