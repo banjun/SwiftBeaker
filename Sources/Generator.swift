@@ -158,13 +158,13 @@ extension APIBlueprintTransition: SwiftConvertible {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
 {% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):
-            return .{{ r.case }}({% if r.type != "Void" %}try JSONDecoder().decode({% if r.innerType %}Responses.{% endif %}{{ r.type }}.self, from: object as! Data){% endif %})
+            return .{{ r.case }}({{ r.decode }})
 {% endfor %}        default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
     }
 }
-""", environment: stencilEnvironment) // TODO: enum CodingKeys for non swift identifiable keys, TODO: no decode for text/html
+""", environment: stencilEnvironment)
         let siblingResponses = try allResponses(method: request.method)
         let responseCases = try siblingResponses.map { r -> [String: Any] in
             let type: String
@@ -196,7 +196,16 @@ extension APIBlueprintTransition: SwiftConvertible {
                 "contentType": r.contentType.map {"\"\($0)\"?"} ?? "_",
                 "case": "http\(r.statusCode)_\(contentTypeEscaped)",
                 "type": type,
-                ]
+                "decode": {
+                    switch r.contentType {
+                    case nil, "application/json"?:
+                        return "try JSONDecoder().decode(\(innerType.map {_ in "Responses." + type} ?? type).self, from: data(from: object, urlResponse: urlResponse))"
+                    case "text/html"?, "text/plain"?:
+                        return "try string(from: object, urlResponse: urlResponse)"
+                    default:
+                        return ""
+                    }
+                }()]
             if let innerType = innerType {
                 context["innerType"] = innerType.local.indented(by: 8)
             }

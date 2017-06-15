@@ -43,20 +43,18 @@ extension APIBlueprintRequest {
         return (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
     }
 
-    // convert object (Data) to expected type
-    public func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
-        let contentType = contentMIMEType(in: urlResponse)
-        switch (object, contentType) {
-        case let (data as Data, "application/json"?): return data
-        case let (data as Data, "text/plain"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, "text/html"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, _): return data
-        default: return object
+    func data(from object: Any, urlResponse: HTTPURLResponse) throws -> Data {
+        guard let d = object as? Data else {
+            throw ResponseError.invalidData(urlResponse.statusCode, contentMIMEType(in: urlResponse))
         }
+        return d
+    }
+
+    func string(from object: Any, urlResponse: HTTPURLResponse) throws -> String {
+        guard let s = String(data: try data(from: object, urlResponse: urlResponse), encoding: .utf8) else {
+            throw ResponseError.invalidData(urlResponse.statusCode, contentMIMEType(in: urlResponse))
+        }
+        return s
     }
 }
 
