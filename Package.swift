@@ -1,11 +1,17 @@
-// swift-tools-version:3.1
+// swift-tools-version:4.0
 
 import PackageDescription
 
 let package = Package(
     name: "SwiftBeaker",
-    dependencies: [.Package(url: "https://github.com/ikesyo/Himotoki", majorVersion: 3),
-                   .Package(url: "https://github.com/kylef/Stencil", majorVersion: 0),
-                   .Package(url: "https://github.com/kylef/Commander", majorVersion: 0)
+    products: [.executable(name: "SwiftBeaker", targets: ["SwiftBeaker"])],
+    dependencies: [.package(url: "https://github.com/ikesyo/Himotoki", from: "3.0.0"),
+                   .package(url: "https://github.com/kylef/Stencil", from: "0.0.0"),
+                   .package(url: "https://github.com/kylef/Commander", from: "0.0.0")
+    ],
+    targets: [
+        .target(name: "SwiftBeaker",
+                dependencies: ["Himotoki", "Stencil", "Commander"],
+                path: "Sources")
     ]
 )
