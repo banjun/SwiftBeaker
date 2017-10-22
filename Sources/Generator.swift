@@ -52,49 +52,37 @@ private let stencilEnvironment = Environment(extensions: [stencilExtension])
 
 extension APIBlueprintDataStructure: SwiftConvertible {
     func swift(_ name: String? = nil, public: Bool) throws -> SwiftCode {
-        let localDSTemplate = Template(templateString: ["{{ public }}struct {{ name }} { {% for v in vars %}",
-                                                        "    {{ v.doc }}",
-                                                        "    {{ public }}var {{ v.name|escapeKeyword }}: {{ v.type }}{% endfor %}{% if publicMemberwiseInit %}",
-                                                        "",
-                                                        "    // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}",
-                                                        "    public init({% for v in vars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {",
-                                                        "    {% for v in vars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}",
-                                                        "    {% endfor %}}{% endif %}",
-                                                        "}\n"].joined(separator: "\n"), environment: stencilEnvironment)
-        let globalDSTemplate = Template(templateString: ["extension {{ fqn }}: Decodable {",
-                                                         "    {{ public }}static func decode(_ e: Extractor) throws -> {{ fqn }} {",
-                                                         "        return try self.init({% for v in vars %}",
-                                                         "            {{ v.name }}: e {{ v.decoder }} \"{{ v.name }}\"{% if not forloop.last %},{% endif %}{% endfor %}",
-                                                         "        )",
-                                                         "    }",
-                                                         "}",
-                                                         "extension {{ fqn }}: DataStructureType {",
-                                                         "    {{ public }}var jsonBodyParametersObject: Any {",
-                                                         "        var j: [String: Any] = [:]",
-                                                         "{% for v in vars %}        j[\"{{ v.name }}\"] = {{ v.name|escapeKeyword }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j",
-                                                         "    }",
-                                                         "}\n"].joined(separator: "\n"), environment: stencilEnvironment)
+        let localDSTemplate = Template(templateString: """
+{{ public }}struct {{ name }}: Codable { {% for v in vars %}
+    {{ v.doc }}
+    {{ public }}var {{ v.name|escapeKeyword }}: {{ v.type }}{% endfor %}{% if publicMemberwiseInit %}
 
+    // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}
+    public init({% for v in vars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {
+    {% for v in vars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}
+    {% endfor %}}{% endif %}
+}
+""", environment: stencilEnvironment)
         guard let name = ((name ?? id).map {$0.swiftKeywordsEscaped()}) else { throw ConversionError.undefined }
-        let vars: [[String: Any]] = members.map { m in
-            let optional = !m.required
-            let optionalSuffix = optional ? "?" : ""
-            return [
-                "name": m.swiftName,
-                "type": m.swiftType,
-                "optional": optional,
-                "doc": m.swiftDoc,
-                "decoder": (m.content.type.isArray ? "<||" : "<|") + optionalSuffix]}
+        let vars: [[String: Any]] = try members
+            .map {try $0.memberAvoidingSwiftRecursiveStruct(parentTypes: [name])}
+            .map { m in
+                let optional = !m.required
+                let optionalSuffix = optional ? "?" : ""
+
+                return [
+                    "name": m.swiftName,
+                    "type": m.swiftType,
+                    "optional": optional,
+                    "doc": m.swiftDoc,
+                    "decoder": (m.content.type.isArray ? "<||" : "<|") + optionalSuffix]}
 
         let localName = name.components(separatedBy: ".").last ?? name
         return (local: try localDSTemplate.render(["public": `public` ? "public " : "",
                                                    "publicMemberwiseInit": `public`,
                                                    "name": localName.swiftIdentifierized(),
                                                    "vars": vars]),
-                global: try globalDSTemplate.render(["public": `public` ? "public " : "",
-                                                     "name": localName.swiftIdentifierized(),
-                                                     "fqn": name.components(separatedBy: ".").map {$0.swiftIdentifierized()}.joined(separator: "."),
-                                                     "vars": vars]))
+                global: "")
     }
 }
 
@@ -114,67 +102,70 @@ extension APIBlueprintTransition: SwiftConvertible {
                 .flatMap {$0.transaction.responses}
         }
 
-        let trTemplate = Template(templateString: ["{{ copy }}",
-                                                   "{{ public }}struct {{ name }}: {{ extensions|join:\", \" }} {",
-                                                   "    {{ public }}let baseURL: URL",
-                                                   "    {{ public }}var method: HTTPMethod {return {{ method }}}",
-                                                   "{% for v in pathVars %}{% if forloop.first %}",
-                                                   "    {{ public }}let path = \"\" // see intercept(urlRequest:)",
-                                                   "    static let pathTemplate: URITemplate = \"{{ path }}\"",
-                                                   "    {{ public }}var pathVars: PathVars",
-                                                   "    {{ public }}struct PathVars {",
-                                                   "{% endif %}        {{ v.doc }}",
-                                                   "        {{ public }}var {{ v.name }}: {{ v.type }}{% if forloop.last %}{% if publicMemberwiseInit %}",
-                                                   "",
-                                                   "        // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}",
-                                                   "        public init({% for v in pathVars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {",
-                                                   "        {% for v in pathVars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}",
-                                                   "        {% endfor %}}{% endif %}",
-                                                   "    }{% endif %}{% empty %}",
-                                                   "    {{ public }}var path: String {return \"{{ path }}\"}{% endfor %}",
-                                                   "{% if paramType %}",
-                                                   "    {{ public }}let param: {{ paramType }}",
-                                                   "    {{ public }}var bodyParameters: BodyParameters? {return {% if paramType == \"String\" %}TextBodyParameters(contentType: \"{{ paramContentType }}\", content: param){% else %}param.jsonBodyParameters{% endif %}}{% endif %}{% if structParam %}{{ structParam }}{% endif %}",
-                                                   "    {{ public }}enum Responses {",
-                                                   "{% for r in responseCases %}        case {{ r.case }}({{ r.type }}){% if r.innerType %}",
-                                                   "{{ r.innerType }}{% endif %}",
-                                                   "{% endfor %}    }",
-                                                   "{% if headerVars %}",
-                                                   "    {{ public }}var headerFields: [String: String] {return headerVars.context as? [String: String] ?? [:]}",
-                                                   "    {{ public }}var headerVars: HeaderVars",
-                                                   "    {{ public }}struct HeaderVars {",
-                                                   "{% for v in headerVars %}       {{ v.doc }}",
-                                                   "        {{ public }}var {{ v.name }}: {{ v.type }}",
-                                                   "{% endfor %}{% if publicMemberwiseInit %}",
-                                                   "        // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}",
-                                                   "        public init({% for v in headerVars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {",
-                                                   "        {% for v in headerVars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}",
-                                                   "        {% endfor %}}{% endif %}",
-                                                   "    }",
-                                                   "{% endif %}{% if publicMemberwiseInit %}",
-                                                   "    // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}",
-                                                   "    public init(baseURL: URL{% if pathVars %}, pathVars: PathVars{% endif %}{% if paramType %}, param: {{ paramType }}{% endif %}{% if headerVars %}, headerVars: HeaderVars{% endif %}) {",
-                                                   "        self.baseURL = baseURL{% if pathVars %}\n        self.pathVars = pathVars{% endif %}{% if paramType %}\n        self.param = param{% endif %}{% if headerVars %}\n        self.headerVars = headerVars{% endif %}",
-                                                   "    }",
-                                                   "{% endif %}",
-                                                   "    {{ public }}func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {",
-                                                   "        let contentType = contentMIMEType(in: urlResponse)",
-                                                   "        switch (urlResponse.statusCode, contentType) {",
-                                                   "{% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):",
-                                                   "            return .{{ r.case }}({% if r.type != \"Void\" %}try {% if r.innerType %}Responses.{% endif %}{{ r.type }}.decodeValue(object){% endif %})",
-                                                   "{% endfor %}        default:",
-                                                   "            throw ResponseError.undefined(urlResponse.statusCode, contentType)",
-                                                   "        }",
-                                                   "    }",
-                                                   "}\n"].joined(separator: "\n"), environment: stencilEnvironment)
-        let globalPathVarsTemplate = Template(templateString: [ // FIXME: rename protocol name
-            "extension {{ fqn }}: URITemplateContextConvertible {",
-            "    var jsonBodyParametersObject: Any {",
-            "        var j: [String: Any] = [:]",
-            "{% for v in vars %}        j[\"{{ v.key }}\"] = {{ v.name }}{% if v.optional %}?{% endif %}.jsonBodyParametersObject\n{% endfor %}        return j",
-            "    }",
-            "}\n"].joined(separator: "\n"))
+        let trTemplate = Template(templateString: """
+{{ copy }}
+{{ public }}struct {{ name }}: {{ extensions|join:", " }} {
+    {{ public }}let baseURL: URL
+    {{ public }}var method: HTTPMethod {return {{ method }}}
+{% for v in pathVars %}{% if forloop.first %}
+    {{ public }}let path = "" // see intercept(urlRequest:)
+    static let pathTemplate: URITemplate = "{{ path }}"
+    {{ public }}var pathVars: PathVars
+    {{ public }}struct PathVars: URITemplateContextConvertible {
+{% endif %}        {{ v.doc }}
+        {{ public }}var {{ v.name|escapeKeyword }}: {{ v.type }}{% if forloop.last %}{% if publicMemberwiseInit %}
 
+        // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}
+        public init({% for v in pathVars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {
+        {% for v in pathVars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}
+        {% endfor %}}{% endif %}
+    }{% else %}
+{% endif %}{% empty %}
+    {{ public }}var path: String {return "{{ path }}"}{% endfor %}
+{% if paramType %}
+    {{ public }}let param: {{ paramType }}
+    {{ public }}var bodyParameters: BodyParameters? {% if paramType == "String" %}{return TextBodyParameters(contentType: "{{ paramContentType }}", content: param)}{% else %}{
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? JSONBodyParameters(JSONObject: JSONSerialization.jsonObject(with: encoder.encode(param)))
+    }
+{% endif %}{% endif %}{% if structParam %}{{ structParam }}{% endif %}
+    {{ public }}enum Responses {
+{% for r in responseCases %}        case {{ r.case }}({{ r.type }}){% if r.innerType %}
+{{ r.innerType }}{% endif %}
+{% endfor %}    }
+{% if headerVars %}
+    {{ public }}var headerFields: [String: String] {return headerVars.context}
+    {{ public }}var headerVars: HeaderVars
+    {{ public }}struct HeaderVars: URITemplateContextConvertible {
+{% for v in headerVars %}        {{ v.doc }}
+        {{ public }}var {{ v.name }}: {{ v.type }}
+{% endfor %}
+        enum CodingKeys: String, CodingKey {
+{% for v in headerVars %}            case {{ v.name }} = "{{ v.key }}"
+{% endfor %}        }{% if publicMemberwiseInit %}
+        // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}
+        public init({% for v in headerVars %}{{ v.name|escapeKeyword }}: {{ v.type }}{% ifnot forloop.last %}, {% endif %}{% endfor %}) {
+        {% for v in headerVars %}    self.{{ v.name|escapeKeyword }} = {{ v.name|escapeKeyword }}
+        {% endfor %}}{% endif %}
+    }
+{% endif %}{% if publicMemberwiseInit %}
+    // public memberwise init{# default synthesized memberwise init is internal in Swift 3 #}
+    public init(baseURL: URL{% if pathVars %}, pathVars: PathVars{% endif %}{% if paramType %}, param: {{ paramType }}{% endif %}{% if headerVars %}, headerVars: HeaderVars{% endif %}) {
+        self.baseURL = baseURL{% if pathVars %}\n        self.pathVars = pathVars{% endif %}{% if paramType %}\n        self.param = param{% endif %}{% if headerVars %}\n        self.headerVars = headerVars{% endif %}
+    }
+{% endif %}
+    {{ public }}func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
+        switch (urlResponse.statusCode, contentType) {
+{% for r in responseCases %}        case ({{ r.statusCode }}, {{ r.contentType }}):
+            return .{{ r.case }}({{ r.decode }})
+{% endfor %}        default:
+            throw ResponseError.undefined(urlResponse.statusCode, contentType)
+        }
+    }
+}
+""", environment: stencilEnvironment)
         let siblingResponses = try allResponses(method: request.method)
         let responseCases = try siblingResponses.map { r -> [String: Any] in
             let type: String
@@ -206,7 +197,16 @@ extension APIBlueprintTransition: SwiftConvertible {
                 "contentType": r.contentType.map {"\"\($0)\"?"} ?? "_",
                 "case": "http\(r.statusCode)_\(contentTypeEscaped)",
                 "type": type,
-                ]
+                "decode": {
+                    switch r.contentType {
+                    case nil, "application/json"?:
+                        return "try decodeJSON(from: object, urlResponse: urlResponse)"
+                    case "text/html"?, "text/plain"?:
+                        return "try string(from: object, urlResponse: urlResponse)"
+                    default:
+                        return ""
+                    }
+                }()]
             if let innerType = innerType {
                 context["innerType"] = innerType.local.indented(by: 8)
             }
@@ -231,9 +231,6 @@ extension APIBlueprintTransition: SwiftConvertible {
             }
             context["extensions"] = ["APIBlueprintRequest", "URITemplateRequest"]
             context["pathVars"] = pathVars
-            globalExtensionCode += try globalPathVarsTemplate.render([
-                "fqn": [requestTypeName, "PathVars"].joined(separator: "."),
-                "vars": pathVars])
         } else {
             context["extensions"] = ["APIBlueprintRequest"]
         }
@@ -245,9 +242,6 @@ extension APIBlueprintTransition: SwiftConvertible {
                  "doc": v.docCommentPrefixed()]
             }
             context["headerVars"] = headerVars
-            globalExtensionCode += try globalPathVarsTemplate.render([
-                "fqn": [requestTypeName, "HeaderVars"].joined(separator: "."),
-                "vars": headerVars])
         }
         switch request.dataStructure {
         case let .anonymous(members)?:
@@ -276,8 +270,8 @@ extension APIBlueprintTransition: SwiftConvertible {
 
 
     func swiftRequestTypeName(request: Transaction.Request, resource: APIBlueprintResourceGroup.Resource) throws -> String {
-        if let title = title, let first = title.characters.first {
-            return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
+        if let title = title, let first = title.first {
+            return (String(first).uppercased() + String(title.dropFirst())).swiftIdentifierized()
         } else {
             return try (request.method + "_" + resource.href(transition: self, request: request)).swiftIdentifierized()
         }
@@ -293,6 +287,8 @@ extension APIBlueprintMember {
             name = t.swiftTypeMapped().swiftKeywordsEscaped()
         case let .array(t):
             name = "[" + (t.map {$0.swiftTypeMapped().swiftKeywordsEscaped()} ?? "Any") + "]"
+        case let .indirect(t):
+            name = "Indirect<\(t)>"
         }
         return name + (required ? "" : "?")
     }
@@ -300,4 +296,23 @@ extension APIBlueprintMember {
         .flatMap {$0}
         .joined(separator: " ")
         .docCommentPrefixed()}
+
+    func memberAvoidingSwiftRecursiveStruct(parentTypes: [String]) throws -> APIBlueprintMember {
+        let recursive = parentTypes.contains {
+            if case .exact($0) = content.type { return true } // currently support simple recursions
+            return false
+        }
+        guard recursive else { return self }
+        guard !required else {
+            throw ConversionError.notSupported("recursive data structure with required param")
+        }
+        guard case let .exact(exactType) = content.type else {
+            throw ConversionError.notSupported("recursive data structure with compound param")
+        }
+
+        return APIBlueprintMember(
+            meta: meta,
+            typeAttributes: typeAttributes?.filter {$0 != "required"},
+            content: APIBlueprintMemberContent(name: content.name, type: .indirect(exactType), value: content.value, displayValue: content.displayValue))
+    }
 }

@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'SwiftBeaker'
-  s.version          = '0.4.1'
+  s.version          = '1.0.0-beta.1'
   s.summary          = 'Swift client generator for API Blueprint'
   s.description      = <<-DESC
   SwiftBeaker is a Swift client generator for API Blueprint.
@@ -14,6 +14,5 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '9.0'
   s.source_files = 'Pod/Classes/**/*.swift'
   s.dependency 'APIKit'
-  s.dependency 'Himotoki'
   s.dependency 'URITemplate'
 end

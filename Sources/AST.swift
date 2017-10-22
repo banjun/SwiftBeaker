@@ -56,7 +56,7 @@ struct APIBlueprintResourceGroup: APIBlueprintCategoryDecodable {
                 transitions: APIBlueprintTransition.decodeElements(e))
         }
 
-        struct Attributes: Decodable {
+        struct Attributes: Himotoki.Decodable {
             let href: String?
             static func decode(_ e: Extractor) throws -> APIBlueprintResourceGroup.Resource.Attributes {
                 return try Attributes(href: e <|? "href")
@@ -114,7 +114,7 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
             httpTransactions: Transaction.decodeElements(e))
     }
 
-    struct Attributes: Decodable {
+    struct Attributes: Himotoki.Decodable {
         let href: String?
         let hrefVariables: HrefVariables?
 
@@ -181,7 +181,7 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
             }
         }
 
-        struct Headers: Decodable {
+        struct Headers: Himotoki.Decodable {
             static let elementName = "httpHeaders"
             let members: [APIBlueprintMember]
             static func decode(_ e: Extractor) throws -> Headers {
@@ -202,7 +202,7 @@ struct APIBlueprintTransition: APIBlueprintElementDecodable {
     }
 }
 
-struct APIBlueprintElement: Decodable {
+struct APIBlueprintElement: Himotoki.Decodable {
     let element: String
     let meta: APIBlueprintMeta?
 
@@ -213,7 +213,7 @@ struct APIBlueprintElement: Decodable {
     }
 }
 
-struct APIBlueprintMeta: Decodable {
+struct APIBlueprintMeta: Himotoki.Decodable {
     let classes: [String]?
     let id: String?
     let description: String?
@@ -251,7 +251,7 @@ struct APIBlueprintStringElement: APIBlueprintElementDecodable {
     }
 }
 
-struct APIBlueprintMemberContent: Decodable {
+struct APIBlueprintMemberContent: Himotoki.Decodable {
     let name: String
     let type: APIBlueprintMemberType
     let value: String? // value, 42, [value], ...
@@ -276,6 +276,8 @@ struct APIBlueprintMemberContent: Decodable {
             displayValue = "[" + contents.map {"\"" + $0.value + "\""}.joined(separator: ", ") + "]"
         case .exact("enum"):
             throw ConversionError.notSupported("\(type) at \(self)")
+        case .indirect:
+            throw ConversionError.undefined
         case let .exact(id):
             value = id
             displayValue = value
@@ -297,14 +299,16 @@ struct APIBlueprintMemberContent: Decodable {
     }
 }
 
-enum APIBlueprintMemberType: Decodable {
+enum APIBlueprintMemberType: Himotoki.Decodable {
     case exact(String)
     case array(String?)
+    case indirect(String)
 
     var isArray: Bool {
         switch self {
         case .exact: return false
         case .array: return true
+        case .indirect: return false
         }
     }
 
@@ -320,7 +324,7 @@ enum APIBlueprintMemberType: Decodable {
     }
 }
 
-struct APIBlueprintAnyElement: Decodable {
+struct APIBlueprintAnyElement: Himotoki.Decodable {
     let element: String
     static func decode(_ e: Extractor) throws -> APIBlueprintAnyElement {
         return try APIBlueprintAnyElement(element: e <| "element")

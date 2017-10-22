@@ -14,12 +14,19 @@ struct Core {
 
         print(preamble)
         print("\n// MARK: - Transitions\n")
-        transitionsSwift.forEach {print($0.local)}
+        transitionsSwift.forEach {print($0.local + "\n")}
         print("\n// MARK: - Data Structures\n")
-        dataStructuresSwift.forEach {print($0.local)}
-        print("\n// MARK: - Extensions\n")
-        [transitionsSwift,
-         dataStructuresSwift].joined().forEach {print($0.global)}
+        dataStructuresSwift.forEach {print($0.local + "\n")}
+        let extensions = [transitionsSwift,
+                          dataStructuresSwift].joined().map {$0.global}
+            .reduce("") { (r: String, s: String) -> String in
+                guard !r.hasSuffix("\n") || !s.isEmpty else { return r }
+                return r + "\n" + s
+        }
+        if !extensions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            print("\n// MARK: - Extensions\n")
+            print(extensions)
+        }
     }
 }
 

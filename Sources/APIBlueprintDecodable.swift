@@ -1,6 +1,6 @@
 import Himotoki
 
-protocol APIBlueprintElementDecodable: Decodable {
+protocol APIBlueprintElementDecodable: Himotoki.Decodable {
     static var elementName: String { get }
 }
 extension APIBlueprintElementDecodable {
@@ -38,7 +38,7 @@ extension APIBlueprintElementDecodable {
     }
 }
 
-protocol APIBlueprintCategoryDecodable: Decodable {
+protocol APIBlueprintCategoryDecodable: Himotoki.Decodable {
     static var className: String { get }
 }
 extension APIBlueprintCategoryDecodable {

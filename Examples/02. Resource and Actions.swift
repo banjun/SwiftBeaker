@@ -1,35 +1,19 @@
 import Foundation
 import APIKit
-import Himotoki
 import URITemplate
 
-protocol JSONBodyParametersConvertible {
-    var jsonBodyParametersObject: Any { get }
-}
-extension JSONBodyParametersConvertible {
-    var jsonBodyParameters: JSONBodyParameters {return JSONBodyParameters(JSONObject: jsonBodyParametersObject)}
-    var jsonBodyParametersObject: Any {return self} // default implementation
-}
-
-extension String: JSONBodyParametersConvertible {}
-extension Int: JSONBodyParametersConvertible {}
-extension Bool: JSONBodyParametersConvertible {}
-
-protocol DataStructureType: JSONBodyParametersConvertible {}
-extension Array where Element: JSONBodyParametersConvertible {
-    var jsonBodyParametersObject: Any {return self.map {$0.jsonBodyParametersObject}}
-}
-
-protocol URITemplateContextConvertible: JSONBodyParametersConvertible {}
+protocol URITemplateContextConvertible: Encodable {}
 extension URITemplateContextConvertible {
-    var context: [String: Any] {return jsonBodyParametersObject as? [String: Any] ?? [:]}
+    var context: [String: String] {
+        return ((try? JSONSerialization.jsonObject(with: JSONEncoder().encode(self))) as? [String: String]) ?? [:]
+    }
 }
 
-enum RequestError: Error {
+public enum RequestError: Error {
     case encode
 }
 
-enum ResponseError: Error {
+public enum ResponseError: Error {
     case undefined(Int, String?)
     case invalidData(Int, String?)
 }
@@ -48,28 +32,30 @@ struct TextBodyParameters: BodyParameters {
     }
 }
 
-protocol APIBlueprintRequest: Request {}
+public protocol APIBlueprintRequest: Request {}
 extension APIBlueprintRequest {
-    var dataParser: DataParser {return RawDataParser()}
+    public var dataParser: DataParser {return RawDataParser()}
 
     func contentMIMEType(in urlResponse: HTTPURLResponse) -> String? {
         return (urlResponse.allHeaderFields["Content-Type"] as? String)?.components(separatedBy: ";").first?.trimmingCharacters(in: .whitespaces)
     }
 
-    // convert object (Data) to expected type
-    func intercept(object: Any, urlResponse: HTTPURLResponse) throws -> Any {
-        let contentType = contentMIMEType(in: urlResponse)
-        switch (object, contentType) {
-        case let (data as Data, "application/json"?): return try JSONSerialization.jsonObject(with: data, options: [])
-        case let (data as Data, "text/plain"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, "text/html"?):
-            guard let s = String(data: data, encoding: .utf8) else { throw ResponseError.invalidData(urlResponse.statusCode, contentType) }
-            return s
-        case let (data as Data, _): return data
-        default: return object
+    func data(from object: Any, urlResponse: HTTPURLResponse) throws -> Data {
+        guard let d = object as? Data else {
+            throw ResponseError.invalidData(urlResponse.statusCode, contentMIMEType(in: urlResponse))
         }
+        return d
+    }
+
+    func string(from object: Any, urlResponse: HTTPURLResponse) throws -> String {
+        guard let s = String(data: try data(from: object, urlResponse: urlResponse), encoding: .utf8) else {
+            throw ResponseError.invalidData(urlResponse.statusCode, contentMIMEType(in: urlResponse))
+        }
+        return s
+    }
+
+    func decodeJSON<T: Decodable>(from object: Any, urlResponse: HTTPURLResponse) throws -> T {
+        return try JSONDecoder().decode(T.self, from: data(from: object, urlResponse: urlResponse))
     }
 }
 
@@ -80,13 +66,29 @@ protocol URITemplateRequest: Request {
 }
 extension URITemplateRequest {
     // reconstruct URL to use URITemplate.expand. NOTE: APIKit does not support URITemplate format other than `path + query`
-    func intercept(urlRequest: URLRequest) throws -> URLRequest {
+    public func intercept(urlRequest: URLRequest) throws -> URLRequest {
         var req = urlRequest
         req.url = URL(string: baseURL.absoluteString + type(of: self).pathTemplate.expand(pathVars.context))!
         return req
     }
 }
 
+/// indirect Codable Box-like container for recursive data structure definitions
+public class Indirect<V: Codable>: Codable {
+    public var value: V
+
+    public init(_ value: V) {
+        self.value = value
+    }
+
+    public required init(from decoder: Decoder) throws {
+        self.value = try V(from: decoder)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try value.encode(to: encoder)
+    }
+}
 
 // MARK: - Transitions
 
@@ -111,7 +113,7 @@ struct GET__message: APIBlueprintRequest {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
         case (200, "text/plain"?):
-            return .http200_text_plain(try String.decodeValue(object))
+            return .http200_text_plain(try string(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
@@ -139,7 +141,7 @@ struct PUT__message: APIBlueprintRequest {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
         case (204, _):
-            return .http204_()
+            return .http204_(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
@@ -148,9 +150,4 @@ struct PUT__message: APIBlueprintRequest {
 
 
 // MARK: - Data Structures
-
-
-// MARK: - Extensions
-
-
 
