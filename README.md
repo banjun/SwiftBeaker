@@ -10,6 +10,10 @@ Output is a Swift client code (with some dependencies: APIKit, Himotoki, etc)
 
 see [Examples](./Examples)
 
+## Real World Examples
+
+[banjun/imastodon Mastodon API](https://github.com/banjun/imastodon/blob/m%40ster/API/Mastodon.swift)
+
 ## Build
 
 debug
