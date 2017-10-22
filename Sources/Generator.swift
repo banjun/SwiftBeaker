@@ -270,8 +270,8 @@ extension APIBlueprintTransition: SwiftConvertible {
 
 
     func swiftRequestTypeName(request: Transaction.Request, resource: APIBlueprintResourceGroup.Resource) throws -> String {
-        if let title = title, let first = title.characters.first {
-            return (String(first).uppercased() + String(title.characters.dropFirst())).swiftIdentifierized()
+        if let title = title, let first = title.first {
+            return (String(first).uppercased() + String(title.dropFirst())).swiftIdentifierized()
         } else {
             return try (request.method + "_" + resource.href(transition: self, request: request)).swiftIdentifierized()
         }
