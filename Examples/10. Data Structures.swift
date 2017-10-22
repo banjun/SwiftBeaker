@@ -92,46 +92,73 @@ public class Indirect<V: Codable>: Codable {
 
 // MARK: - Transitions
 
-
-struct Retrieve_a_Message: APIBlueprintRequest {
+/// Retrieves the coupon with the given ID.
+struct Retrieve_a_Coupon: APIBlueprintRequest {
     let baseURL: URL
     var method: HTTPMethod {return .get}
 
-    var path: String {return "/message"}
+    var path: String {return "/coupons/{id}"}
 
     enum Responses {
-        case http200_text_plain(String)
+        case http200_application_json(Coupon)
     }
 
     func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
-        case (200, "text/plain"?):
-            return .http200_text_plain(try string(from: object, urlResponse: urlResponse))
+        case (200, "application/json"?):
+            return .http200_application_json(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
     }
 }
 
-
-struct Update_a_Message: APIBlueprintRequest {
+/// Returns a list of your coupons.
+struct List_all_Coupons: APIBlueprintRequest, URITemplateRequest {
     let baseURL: URL
-    var method: HTTPMethod {return .put}
+    var method: HTTPMethod {return .get}
 
-    var path: String {return "/message"}
+    let path = "" // see intercept(urlRequest:)
+    static let pathTemplate: URITemplate = "/coupons{?limit}"
+    var pathVars: PathVars
+    struct PathVars: URITemplateContextConvertible {
+        /// A limit on the number of objects to be returned. Limit can range
+/// between 1 and 100 items.
+        var limit: String?
+    }
 
-    let param: String
-    var bodyParameters: BodyParameters? {return TextBodyParameters(contentType: "text/plain", content: param)}
     enum Responses {
-        case http204_(Void)
+        case http200_application_json(Coupons)
     }
 
     func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
-        case (204, _):
-            return .http204_(try decodeJSON(from: object, urlResponse: urlResponse))
+        case (200, "application/json"?):
+            return .http200_application_json(try decodeJSON(from: object, urlResponse: urlResponse))
+        default:
+            throw ResponseError.undefined(urlResponse.statusCode, contentType)
+        }
+    }
+}
+
+/// Creates a new Coupon.
+struct Create_a_Coupon: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .post}
+
+    var path: String {return "/coupons{?limit}"}
+
+    enum Responses {
+        case http200_application_json(Coupon)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
+        switch (urlResponse.statusCode, contentType) {
+        case (200, "application/json"?):
+            return .http200_application_json(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
@@ -140,4 +167,12 @@ struct Update_a_Message: APIBlueprintRequest {
 
 
 // MARK: - Data Structures
+
+struct Coupon_Base: Codable { 
+    /// A positive integer between 1 and 100 that represents the discount the
+/// coupon will apply.  ex. 25
+    var percent_off: Int?
+    /// Date after which the coupon can no longer be redeemed
+    var redeem_by: Int?
+}
 
