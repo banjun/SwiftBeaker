@@ -9,10 +9,6 @@ enum APIElements {
         var description: String?
         var links: [LinkElement]?
 
-        init(from decoder: Decoder) throws {
-            fatalError()
-        }
-
         init(id: String? = nil, ref: String? = nil, classes: [String]? = nil, title: String? = nil, description: String? = nil, links: [LinkElement]? = nil) {
             self.id = id
             self.ref = ref
@@ -84,6 +80,69 @@ final class AnyBasicElement<Attributes: APIElementsAttributes>: BasicElement {
     var content: Any {box.content}
 }
 
+struct AnyElement: BasicElement {
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: AnyAttributes?
+    var content: Any
+
+    private enum CodingKeys: CodingKey {
+        case element, meta, attributes, content
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let element = try container.decode(String.self, forKey: .element)
+        self.element = element
+        switch element {
+        case StringElement.elementName: self.content = try container.decode(StringElement.Content.self, forKey: .content)
+        case CategoryElement.elementName: self.content = try container.decode(CategoryElement.Content.self, forKey: .content)
+        case CopyElement.elementName: self.content = try container.decode(CopyElement.Content.self, forKey: .content)
+        case ResourceElement.elementName: self.content = try container.decode(ResourceElement.Content.self, forKey: .content)
+        case TransitionElement.elementName: self.content = try container.decode(TransitionElement.Content.self, forKey: .content)
+        case HTTPTransactionElement.elementName: self.content = try container.decode(HTTPTransactionElement.Content.self, forKey: .content)
+        case HTTPRequestElement.elementName: self.content = try container.decode(HTTPRequestElement.Content.self, forKey: .content)
+        case HTTPResponseElement.elementName: self.content = try container.decode(HTTPResponseElement.Content.self, forKey: .content)
+        case AssetElement.elementName: self.content = try container.decode(AssetElement.Content.self, forKey: .content)
+        default:
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element name to decode content: \(element)"))
+        }
+
+        self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
+        self.attributes = try container.decodeIfPresent(AnyAttributes.self, forKey: .attributes)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(element, forKey: .element)
+        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encodeIfPresent(attributes, forKey: .attributes)
+
+        switch element {
+        case StringElement.elementName: try container.encode(content as! StringElement.Content, forKey: .content)
+        default: throw EncodingError.invalidValue(element, EncodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element name to encode content: \(element)"))
+        }
+    }
+}
+
+struct AnyAttributes: APIElementsAttributes {
+
+}
+
+final class Box<Value: Codable>: Codable {
+    var value: Value
+    init(_ value: Value) {
+        self.value = value
+    }
+    init(from decoder: Decoder) throws {
+        try self.value = Value(from: decoder)
+    }
+    func encode(to encoder: Encoder) throws {
+        try value.encode(to: encoder)
+    }
+}
+
 protocol TypedElement: BasicElement {
     static var elementName: String { get }
 }
@@ -121,12 +180,12 @@ struct CategoryElement: TypedElement {
     var element: String
     var meta: APIElements.Meta?
     var attributes: APIElements.NilAttributes?
-    var content: [AnyBasicElement<APIElements.NilAttributes>]
+    var content: [AnyElement]
 }
 extension CategoryElement {
-    var resources: [Any] {
-        content.compactMap {$0.content}
-    }
+//    var resources: [Any] {
+//        content.compactMap {$0.content}
+//    }
 }
 
 struct ResourceElement: TypedElement {
@@ -134,7 +193,47 @@ struct ResourceElement: TypedElement {
     var element: String
     var meta: APIElements.Meta?
     var attributes: APIElements.NilAttributes?
-    var content: [AnyBasicElement<APIElements.NilAttributes>]
+    var content: [AnyElement]
+}
+
+struct TransitionElement: TypedElement {
+    static let elementName = "transition"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: APIElements.NilAttributes?
+    var content: [AnyElement]
+}
+
+struct HTTPTransactionElement: TypedElement {
+    static let elementName = "httpTransaction"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: APIElements.NilAttributes?
+    var content: [AnyElement]
+}
+
+struct HTTPRequestElement: TypedElement {
+    static let elementName = "httpRequest"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: APIElements.NilAttributes?
+    var content: [AnyElement]
+}
+
+struct HTTPResponseElement: TypedElement {
+    static let elementName = "httpResponse"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: APIElements.NilAttributes?
+    var content: [AnyElement]
+}
+
+struct AssetElement: TypedElement {
+    static let elementName = "asset"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: APIElements.NilAttributes?
+    var content: String
 }
 
 protocol APIElementsAttributes: Codable {
@@ -146,7 +245,7 @@ struct ParseResultElement: TypedElement {
     var element: String
     var meta: APIElements.Meta?
     var attributes: Attributes?
-    var content: [AnyBasicElement<APIElements.NilAttributes>]
+    var content: [AnyElement]
 
     struct Attributes: APIElementsAttributes {
         var meta: [APIElements.Meta]
@@ -185,37 +284,6 @@ extension APIBlueprintAST {
             .flatMap {try? JSONEncoder().encode($0)}
             .flatMap {try? JSONDecoder().decode(CategoryElement.self, from: $0)}
     }
-}
-
-func hoge() -> ParseResultElement {
-    ParseResultElement(
-        element: "parseResult",
-        meta: APIElements.Meta(
-            classes: ["api"],
-            title: "Data Structures API"),
-        attributes: ParseResultElement.Attributes(
-            meta: [.init(classes: ["user"])]),
-        content: [
-            .init(CopyElement(
-                element: CopyElement.elementName,
-                content: "Following [Advanced Attributes](09.%20Advanced%20Attributes.md), this example\ndemonstrates defining arbitrary data structure to be reused by various\nattribute descriptions.\n\nSince a portion of the `Coupon` data structure is shared between the `Coupon`\ndefinition itself and the `Create a Coupon` action, it was separated into a\n`Coupon Base` data structure in the `Data Structures` API Blueprint Section.\nDoing so enables us to reuse it as a base-type of other attribute definitions.\n\n## API Blueprint\n\n+ [Previous: Advanced Attributes](09.%20Advanced%20Attributes.md)\n\n+ [This: Raw API Blueprint](https://raw.github.com/apiaryio/api-blueprint/master/examples/10.%20Data%20Structures.md)\n\n+ [Next: Resource Model](11.%20Resource%20Model.md)")),
-            .init(CategoryElement(
-                element: "category",
-                meta: APIElements.Meta(
-                    classes: ["resourceGroup"]),
-                attributes: nil,
-                content: [
-                    AnyBasicElement(ResourceElement(
-                        element: ResourceElement.elementName,
-                        meta: APIElements.Meta(
-                            title: "Coupon"),
-                        attributes: nil,
-                        content: [
-                            .init(CopyElement(
-                                element: CopyElement.elementName,
-                                content: "A coupon contains information about a percent-off or amount-off discount you\nmight want to apply to a customer")),
-                    ]))])),
-    ])
 }
 
 //// MARK: - top-level

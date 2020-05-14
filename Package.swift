@@ -12,10 +12,14 @@ let package = Package(
     targets: [
         .target(
             name: "SwiftBeaker",
-            dependencies: [.product(name: "ArgumentParser", package: "swift-argument-parser"), "Stencil"],
+            dependencies: [.product(name: "ArgumentParser", package: "swift-argument-parser"), "SwiftBeakerCore"],
+            path: "SwiftBeaker"),
+        .target(
+            name: "SwiftBeakerCore",
+            dependencies: ["Stencil"],
             path: "Sources"),
         .testTarget(
             name: "SwiftBeakerTests",
-            dependencies: ["SwiftBeaker"]),
+            dependencies: ["SwiftBeakerCore"]),
     ]
 )

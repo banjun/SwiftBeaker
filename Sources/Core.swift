@@ -1,12 +1,12 @@
 import Foundation
 import Stencil
 
-struct Core {
-    static func main(file: String, public: Bool) throws {
+public struct Core {
+    public static func main(file: String, public: Bool) throws {
         let d = try Data(contentsOf: URL(fileURLWithPath: file))
         let ast = try JSONDecoder().decode(APIBlueprintAST.self, from: d)
-        let resources = ast.resourceGroup.flatMap {$0.resources}
-        print(resources)
+//        let resources = ast.resourceGroup.flatMap {$0.resources}
+//        print(resources)
 //        let transitionsSwift = try resources.flatMap { r in
 //            try r.transitions.map {try $0.swift(r, public: `public`)}
 //        }
