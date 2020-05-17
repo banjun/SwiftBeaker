@@ -16,20 +16,186 @@ class APIElementsTests: XCTestCase {
         XCTAssertEqual(result.element, "parseResult")
         XCTAssertEqual(result.content.count, 1)
 
-        let apiCategory = result.content[0]
+        guard case let .api(apiCategory) = result.content[0] else { return XCTFail() }
         XCTAssertEqual(apiCategory.element, "category")
         XCTAssertEqual(apiCategory.meta?.classes, ["api"])
 
-        let copy = (apiCategory.content as! CategoryElement.Content)[0]
-        XCTAssertTrue((copy.content as! CopyElement.Content).hasPrefix("This is one of the simplest APIs"))
+        guard case let .copy(copy) = apiCategory.content[0] else { return XCTFail() }
+        XCTAssertTrue(copy.content.hasPrefix("This is one of the simplest APIs"))
 
-        let resourceGroupCategory = (apiCategory.content as! CategoryElement.Content)[1]
-        let resource = (resourceGroupCategory.content as! CategoryElement.Content)[0]
-        let transition = (resource.content as! ResourceElement.Content)[0]
-        let httpTransaction = (transition.content as! TransitionElement.Content)[0]
-        let httpRequest = (httpTransaction.content as! HTTPTransactionElement.Content)[0]
-        let httpResponse = (httpTransaction.content as! HTTPTransactionElement.Content)[1]
-        let responseAsset = (httpResponse.content as! HTTPResponseElement.Content)[0]
-        XCTAssertEqual(responseAsset.content as! AssetElement.Content, "Hello World!\n")
+        let resourceGroups = apiCategory.resourceGroups
+        let resourceGroup = resourceGroups[0]
+        let resource = resourceGroup.content[0]
+        XCTAssertEqual(resource.attributes.href, "/message")
+
+        let transitions = resource.transitions
+        XCTAssertEqual(transitions.count, 1)
+        let transition = transitions[0]
+
+        let httpTransactions = transition.transactions
+        XCTAssertEqual(httpTransactions.count, 1)
+        let httpTransaction = httpTransactions[0]
+
+        guard case let .httpRequest(httpRequest) = httpTransaction.content[0] else { return XCTFail() }
+        XCTAssertEqual(httpRequest.attributes.method, .GET)
+
+        guard case let .httpResponse(httpResponse) = httpTransaction.content[1] else { return XCTFail() }
+
+        guard case let .asset(asset) = httpResponse.content[0] else { return XCTFail() }
+        XCTAssertEqual(asset.content, "Hello World!\n")
+    }
+
+    func test_10_Data_Structures() {
+        let result = try! JSONDecoder().decode(ParseResultElement.self, from: testdata("10. Data Structures.md.json"))
+        let api = result.api!
+        let dataStructures = api.dataStructures
+        XCTAssertEqual(dataStructures.count, 1)
+
+        guard case .named(let couponBaseID, let couponBaseMembers, let couponBaseBaseRef) = dataStructures[0].content else { return XCTFail() }
+        XCTAssertEqual(couponBaseID, "Coupon Base")
+        XCTAssertEqual(couponBaseBaseRef, "object")
+        XCTAssertEqual(couponBaseMembers.count, 2)
+        XCTAssertEqual(couponBaseMembers[0].content.key.content, "percent_off")
+        XCTAssertEqual(couponBaseMembers[0].content.value, .number(25))
+        XCTAssertEqual(couponBaseMembers[0].description, "A positive integer between 1 and 100 that represents the discount the\ncoupon will apply.")
+        XCTAssertEqual(couponBaseMembers[1].content.key.content, "redeem_by")
+        XCTAssertEqual(couponBaseMembers[1].content.value, .number(nil))
+        XCTAssertEqual(couponBaseMembers[1].description, "Date after which the coupon can no longer be redeemed")
+
+        let resource = api.resourceGroups[0].content[0]
+        XCTAssertEqual(resource.attributes.href, "/coupons/{id}")
+    }
+
+    func testTypeAttributes() {
+        let member1 = try! JSONDecoder().decode(MemberElement.self, from: """
+            {
+                  "element": "member",
+                  "meta": {
+                    "title": "ID"
+                  },
+                  "attributes": {
+                    "typeAttributes": [
+                      "required"
+                    ]
+                  },
+                  "content": {
+                    "key": {
+                      "element": "string",
+                      "content": "id"
+                    },
+                    "value": {
+                      "element": "string"
+                    }
+                  }
+                }
+            """.data(using: .utf8)!)
+        XCTAssertEqual(member1.name, "id")
+        XCTAssertTrue(member1.required)
+
+        let member2 = try! JSONDecoder().decode(MemberElement.self, from: """
+            {
+                  "element": "member",
+                  "meta": {
+                    "description": "Text to be shown as a warning before the actual content",
+                    "title": "string"
+                  },
+                  "attributes": {
+                    "typeAttributes": [
+                      "optional"
+                    ]
+                  },
+                  "content": {
+                    "key": {
+                      "element": "string",
+                      "content": "spoiler_text"
+                    },
+                    "value": {
+                      "element": "string"
+                    }
+                  }
+                }
+            """.data(using: .utf8)!)
+        XCTAssertEqual(member2.name, "spoiler_text")
+        XCTAssertFalse(member2.required)
+    }
+
+    func testHrefVariables() {
+        let transition = try! JSONDecoder().decode(TransitionElement.self, from: """
+            {
+              "element": "transition",
+              "meta": {
+                "title": "GetAccount"
+              },
+              "attributes": {
+                "href": "/api/v1/accounts/{id}",
+                "hrefVariables": {
+                  "element": "hrefVariables",
+                  "content": [
+                    {
+                      "element": "member",
+                      "meta": {
+                        "title": "string"
+                      },
+                      "attributes": {
+                        "typeAttributes": [
+                          "required"
+                        ]
+                      },
+                      "content": {
+                        "key": {
+                          "element": "string",
+                          "content": "id"
+                        },
+                        "value": {
+                          "element": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "content": []
+            }
+        """.data(using: .utf8)!)
+        XCTAssertEqual(transition.attributes?.href, "/api/v1/accounts/{id}")
+        XCTAssertEqual(transition.attributes?.hrefVariables?.content[0].name, "id")
+        XCTAssertEqual(transition.attributes?.hrefVariables?.content[0].required, true)
+        XCTAssertEqual(transition.attributes?.hrefVariables?.content[0].content.value, .string(nil))
+    }
+
+    func testRequestHeaders() {
+        let request = try! JSONDecoder().decode(HTTPRequestElement.self, from: """
+        {
+            "element": "httpRequest",
+            "attributes": {
+              "method": "POST",
+              "headers": {
+                "element": "httpHeaders",
+                "content": [
+                  {
+                    "element": "member",
+                    "content": {
+                      "key": {
+                        "element": "string",
+                        "content": "Content-Type"
+                      },
+                      "value": {
+                        "element": "string",
+                        "content": "application/json"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "content": []
+        }
+        """.data(using: .utf8)!)
+        let headers = request.attributes.headers!.content
+        XCTAssertEqual(headers.count, 1)
+        XCTAssertEqual(headers[0].name, "Content-Type")
+        XCTAssertEqual(headers[0].content.value, .string("application/json"))
+        XCTAssertEqual(request.attributes.headers?.contentType, "application/json")
+        XCTAssertEqual([String: String](headers)["Content-Type"], "application/json")
     }
 }

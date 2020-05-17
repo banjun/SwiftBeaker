@@ -1,263 +1,319 @@
 import Foundation
 
 enum APIElements {
-    struct Meta: Codable {
+    struct Meta: Codable, Equatable {
         var id: String?
         var ref: String?
         var classes: [String]?
         var title: String?
         var description: String?
-        var links: [LinkElement]?
 
-        init(id: String? = nil, ref: String? = nil, classes: [String]? = nil, title: String? = nil, description: String? = nil, links: [LinkElement]? = nil) {
+        init(id: String? = nil, ref: String? = nil, classes: [String]? = nil, title: String? = nil, description: String? = nil) {
             self.id = id
             self.ref = ref
             self.classes = classes
             self.title = title
             self.description = description
-            self.links = links
         }
     }
 
-    enum NilAttributes: APIElementsAttributes {
-        func encode(to encoder: Encoder) throws {}
-        init(from decoder: Decoder) throws {fatalError()}
+    struct Attributes: Codable, Equatable {
+        var meta: [Meta]?
     }
 }
 
-protocol BasicElement: Codable {
-//    static var elementName: String { get }
-    associatedtype Content
-    associatedtype Attributes: APIElementsAttributes
-    var element: String { get }
-    var meta: APIElements.Meta? { get }
-    var attributes: Attributes? { get }
-    var content: Content { get }
+protocol TypedElement: Codable, Equatable {
+    associatedtype ContentType: Codable
+    static var elementName: String { get }
+    var element: String { get set }
+    var content: ContentType { get set }
+}
+extension TypedElement {
+    static func decodeElementAndContent<CodingKeys: CodingKey>(from decoder: Decoder, elementKey: CodingKeys, contentKey: CodingKeys) throws -> (element: String, content: ContentType) {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let element = try container.decode(String.self, forKey: elementKey)
+        guard element == Self.elementName else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [elementKey], debugDescription: "element \(Self.elementName) is expected but found: \(element)"))
+        }
+        let content = try container.decode(ContentType.self, forKey: contentKey)
+        return (element, content)
+    }
+
+    func encode<CodingKeys: CodingKey>(to encoder: Encoder, elementKey: CodingKeys, contentKey: CodingKeys) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(element, forKey: elementKey)
+        try container.encode(content, forKey: contentKey)
+    }
 }
 
-class AnyBasicElementBox<Attributes: APIElementsAttributes>: Codable {
-    var element: String {fatalError("abstract")}
-    var meta: APIElements.Meta? {fatalError("abstract")}
-    var attributes: Attributes? {fatalError("abstract")}
-    var content: Any {fatalError("abstract")}
+protocol SimpleTypedElement: TypedElement {
+    associatedtype CodingKeys = SimpleTypedElementCodingKeys
+    init(element: String, content: ContentType)
 }
-
-final class BasicElementBox<Element: BasicElement>: AnyBasicElementBox<Element.Attributes> {
-    private let base: Element
-    init(_ base: Element) {
-        self.base = base
-        super.init()
+enum SimpleTypedElementCodingKeys: CodingKey { case element, content }
+extension SimpleTypedElement {
+    init(from decoder: Decoder) throws {
+        let ec = try Self.decodeElementAndContent(from: decoder, elementKey: SimpleTypedElementCodingKeys.element, contentKey: SimpleTypedElementCodingKeys.content)
+        self.init(element: ec.element, content: ec.content)
     }
-
-    required init(from decoder: Decoder) throws {
-        self.base = try .init(from: decoder)
-        super.init()
-    }
-
-    override func encode(to encoder: Encoder) throws {
-        try base.encode(to: encoder)
-    }
-
-    override var element: String {base.element}
-    override var meta: APIElements.Meta? {base.meta}
-    override var attributes: Element.Attributes? {base.attributes}
-    override var content: Any {base.content}
-}
-
-final class AnyBasicElement<Attributes: APIElementsAttributes>: BasicElement {
-    private let box: AnyBasicElementBox<Attributes>
-    init<Element: BasicElement>(_ base: Element) where Element.Attributes == Attributes {
-        self.box = BasicElementBox<Element>(base)
-    }
-
     func encode(to encoder: Encoder) throws {
-        try box.encode(to: encoder)
+        try encode(to: encoder, elementKey: SimpleTypedElementCodingKeys.element, contentKey: SimpleTypedElementCodingKeys.content)
     }
-
-    var element: String {box.element}
-    var meta: APIElements.Meta? {box.meta}
-    var attributes: Attributes? {box.attributes}
-    var content: Any {box.content}
 }
 
-struct AnyElement: BasicElement {
+// MARK: -
+
+typealias APIBlueprintAST = ParseResultElement
+
+struct ParseResultElement: SimpleTypedElement {
+    static let elementName = "parseResult"
+    var element: String
+    var content: [Content]
+
+    var api: APICategoryElement? {
+        content.lazy.compactMap {
+            guard case let .api(x) = $0 else { return nil }
+            return x
+        }.first
+    }
+
+    enum Content: Codable, Equatable {
+        case api(APICategoryElement)
+
+        init(from decoder: Decoder) throws {
+            self = .api(try APICategoryElement(from: decoder))
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .api(let e): try e.encode(to: encoder)
+            }
+        }
+    }
+}
+
+struct CategoryElement: Codable {
+    static let elementName = "category"
     var element: String
     var meta: APIElements.Meta?
-    var attributes: AnyAttributes?
-    var content: Any
 
-    private enum CodingKeys: CodingKey {
-        case element, meta, attributes, content
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.element = try container.decode(String.self, forKey: .element)
+        guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
+        self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
+    }
+}
+
+struct APICategoryElement: TypedElement, Equatable {
+    static let elementName = "category"
+    static let className = "api"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: APIElements.Attributes?
+    var content: [Content]
+
+    var resourceGroups: [ResourceGroupCategoryElement] {
+        content.compactMap {
+            guard case let .resourceGroup(x) = $0 else { return nil }
+            return x
+        }
+    }
+
+    var dataStructures: [DataStructureElement] {
+        content.compactMap { content -> DataStructuresCategoryElement? in
+            guard case let .dataStructures(x) = content else { return nil }
+            return x
+        }.flatMap {
+            $0.content
+        }
+    }
+
+    enum Content: Codable, Equatable {
+        case copy(CopyElement)
+        case resourceGroup(ResourceGroupCategoryElement)
+        case dataStructures(DataStructuresCategoryElement)
+
+        enum CodingKeys: String, CodingKey {
+            case element
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            switch element {
+            case CopyElement.elementName:
+                self = .copy(try CopyElement(from: decoder))
+            case CategoryElement.elementName:
+                let category = try CategoryElement(from: decoder)
+                let classes = category.meta?.classes ?? []
+
+                if classes.contains(ResourceGroupCategoryElement.className) {
+                    self = .resourceGroup(try ResourceGroupCategoryElement(from: decoder))
+                } else if classes.contains(DataStructuresCategoryElement.className) {
+                    self = .dataStructures(try DataStructuresCategoryElement(from: decoder))
+                } else {
+                    throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown category element classes found at \(decoder.codingPath): \(classes)"))
+                }
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .copy(let e): try e.encode(to: encoder)
+            case .resourceGroup(let e): try e.encode(to: encoder)
+            case .dataStructures(let e): try e.encode(to: encoder)
+            }
+        }
+
+        var element: String {
+            switch self {
+            case .copy(let e): return e.element
+            case .resourceGroup(let e): return e.element
+            case .dataStructures(let e): return e.element
+            }
+        }
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-
-        let element = try container.decode(String.self, forKey: .element)
-        self.element = element
-        switch element {
-        case StringElement.elementName: self.content = try container.decode(StringElement.Content.self, forKey: .content)
-        case CategoryElement.elementName: self.content = try container.decode(CategoryElement.Content.self, forKey: .content)
-        case CopyElement.elementName: self.content = try container.decode(CopyElement.Content.self, forKey: .content)
-        case ResourceElement.elementName: self.content = try container.decode(ResourceElement.Content.self, forKey: .content)
-        case TransitionElement.elementName: self.content = try container.decode(TransitionElement.Content.self, forKey: .content)
-        case HTTPTransactionElement.elementName: self.content = try container.decode(HTTPTransactionElement.Content.self, forKey: .content)
-        case HTTPRequestElement.elementName: self.content = try container.decode(HTTPRequestElement.Content.self, forKey: .content)
-        case HTTPResponseElement.elementName: self.content = try container.decode(HTTPResponseElement.Content.self, forKey: .content)
-        case AssetElement.elementName: self.content = try container.decode(AssetElement.Content.self, forKey: .content)
-        default:
-            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element name to decode content: \(element)"))
-        }
-
+        self.element = try container.decode(String.self, forKey: .element)
+        guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
         self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
-        self.attributes = try container.decodeIfPresent(AnyAttributes.self, forKey: .attributes)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(element, forKey: .element)
-        try container.encodeIfPresent(meta, forKey: .meta)
-        try container.encodeIfPresent(attributes, forKey: .attributes)
-
-        switch element {
-        case StringElement.elementName: try container.encode(content as! StringElement.Content, forKey: .content)
-        default: throw EncodingError.invalidValue(element, EncodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element name to encode content: \(element)"))
-        }
+        guard (self.meta?.classes ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classes ?? [])")) }
+        self.attributes = try container.decodeIfPresent(APIElements.Attributes.self, forKey: .attributes)
+        self.content = try container.decode([Content].self, forKey: .content)
     }
 }
 
-struct AnyAttributes: APIElementsAttributes {
-
-}
-
-final class Box<Value: Codable>: Codable {
-    var value: Value
-    init(_ value: Value) {
-        self.value = value
-    }
-    init(from decoder: Decoder) throws {
-        try self.value = Value(from: decoder)
-    }
-    func encode(to encoder: Encoder) throws {
-        try value.encode(to: encoder)
-    }
-}
-
-protocol TypedElement: BasicElement {
-    static var elementName: String { get }
-}
-
-struct StringElement: TypedElement {
-    static let elementName = "string"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: String
-}
-
-struct LinkElement: TypedElement {
-    static let elementName = "link"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: Attributes?
-    var content: String
-    struct Attributes: APIElementsAttributes {
-        var relation: StringElement
-        var href: StringElement
-    }
-}
-
-struct CopyElement: TypedElement {
-    static var elementName = "copy"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: String
-}
-
-struct CategoryElement: TypedElement {
+struct ResourceGroupCategoryElement: TypedElement {
     static let elementName = "category"
+    static let className = "resourceGroup"
     var element: String
     var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: [AnyElement]
-}
-extension CategoryElement {
-//    var resources: [Any] {
-//        content.compactMap {$0.content}
-//    }
+    var attributes: APIElements.Attributes?
+    var content: [ResourceElement]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.element = try container.decode(String.self, forKey: .element)
+        guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
+        self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
+        guard (self.meta?.classes ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classes ?? [])")) }
+        self.attributes = try container.decodeIfPresent(APIElements.Attributes.self, forKey: .attributes)
+        self.content = try container.decode([ResourceElement].self, forKey: .content)
+    }
 }
 
-struct ResourceElement: TypedElement {
-    static let elementName = "resource"
+struct DataStructuresCategoryElement: TypedElement {
+    static let elementName = "category"
+    static let className = "dataStructures"
     var element: String
     var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: [AnyElement]
-}
+    var attributes: APIElements.Attributes?
+    var content: [DataStructureElement]
 
-struct TransitionElement: TypedElement {
-    static let elementName = "transition"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: [AnyElement]
-}
-
-struct HTTPTransactionElement: TypedElement {
-    static let elementName = "httpTransaction"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: [AnyElement]
-}
-
-struct HTTPRequestElement: TypedElement {
-    static let elementName = "httpRequest"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: [AnyElement]
-}
-
-struct HTTPResponseElement: TypedElement {
-    static let elementName = "httpResponse"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: [AnyElement]
-}
-
-struct AssetElement: TypedElement {
-    static let elementName = "asset"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: String
-}
-
-protocol APIElementsAttributes: Codable {
-
-}
-
-struct ParseResultElement: TypedElement {
-    static let elementName = "parseResult"
-    var element: String
-    var meta: APIElements.Meta?
-    var attributes: Attributes?
-    var content: [AnyElement]
-
-    struct Attributes: APIElementsAttributes {
-        var meta: [APIElements.Meta]
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.element = try container.decode(String.self, forKey: .element)
+        guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
+        self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
+        guard (self.meta?.classes ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classes ?? [])")) }
+        self.attributes = try container.decodeIfPresent(APIElements.Attributes.self, forKey: .attributes)
+        self.content = try container.decode([DataStructureElement].self, forKey: .content)
     }
 }
 
 struct DataStructureElement: TypedElement {
     static let elementName = "dataStructure"
     var element: String
-    var meta: APIElements.Meta?
-    var attributes: APIElements.NilAttributes?
-    var content: [AnyBasicElement<APIElements.NilAttributes>]
+    var content: Content
+
+    enum Content: Codable, Equatable {
+        case named(id: String, members: [MemberElement], baseRef: String) // id = meta.id, baseRef = element
+        case anonymous(members: [MemberElement]) // element = object but no id
+        case ref(id: String) // id = element
+        case array(id: String, contentRef: String) // element = array, contentRef = content.element
+
+        var id: String? {
+            switch self {
+            case .named(id: let id, members: _, baseRef: _): return id
+            case .anonymous: return nil
+            case .ref(id: let id): return id
+            case .array(id: let id, contentRef: _): return id
+            }
+        }
+        var members: [MemberElement] {
+            switch self {
+            case .named(id: _, members: let members, baseRef: _): return members
+            case .anonymous(members: let members): return members
+            case .ref, .array: return []
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case element, meta, content
+        }
+
+        private struct ArrayContent: Codable {
+            var element: String
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            let meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
+            if let id = meta?.id {
+                if element == "array" {
+                    let content = try container.decode([ArrayContent].self, forKey: .content)
+                    guard content.count == 1, let ref = content.first?.element else {
+                        throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.content], debugDescription: "unexpected non-single type array content: \(content)"))
+                    }
+                    self = .array(id: id, contentRef: ref)
+                } else {
+                    self = .named(
+                        id: id,
+                        members: try container.decode([MemberElement].self, forKey: .content),
+                        baseRef: element)
+                }
+            } else if element == "object" {
+                self = .anonymous(members: try container.decode([MemberElement].self, forKey: .content))
+            } else {
+                self = .ref(id: element)
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .named(id: let id, members: let members, baseRef: let baseRef):
+                try container.encode(baseRef, forKey: .element)
+                try container.encode(APIElements.Meta(id: id), forKey: .meta)
+                try container.encode(members, forKey: .content)
+            case .anonymous(members: let members):
+                try container.encode("object", forKey: .element)
+                try container.encode(members, forKey: .content)
+            case .ref(id: let id):
+                try container.encode(id, forKey: .element)
+            case .array(id: let id, contentRef: let contentRef):
+                try container.encode(id, forKey: .element)
+                try container.encode(["element": contentRef], forKey: .content)
+            }
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.element = try container.decode(String.self, forKey: .element)
+        guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
+        let contents = try container.decode([Content].self, forKey: .content)
+        guard contents.count == 1, let content = contents.first else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.content], debugDescription: "unexpected single array content: \(contents)"))
+        }
+        self.content = content
+    }
 }
 
 struct MemberElement: TypedElement {
@@ -265,443 +321,439 @@ struct MemberElement: TypedElement {
     var element: String
     var meta: APIElements.Meta?
     var attributes: Attributes?
-    var content: [Property]
+    var content: Content
 
-    struct Attributes: APIElementsAttributes {
-        var typeAttributes: [String]
+    var description: String? {
+        meta?.description
     }
 
-    struct Property: Codable {
-        var key: AnyBasicElement<APIElements.NilAttributes>
-        var value: AnyBasicElement<APIElements.NilAttributes>
+    var name: String {content.key.content}
+    var required: Bool {attributes?.typeAttributes?.contains("required") == true}
+
+    struct Attributes: Codable, Equatable {
+        var typeAttributes: [String]?
+    }
+
+    struct Content: Codable, Equatable {
+        var key: StringElement
+        var value: Value
+
+        var displayValue: String? {
+            switch value {
+            case .string(let v): return v.map {"\"" + $0 + "\""}
+            case .number(let v): return v.map {String($0)}
+            case .array(let t): return t.map {"[" + $0 + "]"}
+            case .id(let v): return v
+            case .indirect(let t): return t
+            }
+        }
+
+        enum Value: Codable, Equatable {
+            case string(String?)
+            case number(Double?)
+            case array(String?)
+            case id(String)
+//            case `enum`([String]) // unsupported
+            case indirect(String)
+
+            enum CodingKeys: CodingKey {
+                case element, content
+            }
+
+            var isArray: Bool {
+                switch self {
+                case .array: return true
+                case .string, .number, .id, .indirect: return false
+                }
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try! decoder.container(keyedBy: CodingKeys.self)
+                let element = try! container.decode(String.self, forKey: .element)
+                switch element {
+                case StringElement.elementName: self = .string(try container.decodeIfPresent(String.self, forKey: .content))
+                case NumberElement.elementName: self = .number(try container.decodeIfPresent(Double.self, forKey: .content))
+                case "array":
+                    let content = try container.decodeIfPresent([AnyElement].self, forKey: .content)
+                    self = .array(content?.first?.element)
+//                case "enum": self = .enum([...])
+                default: self = .id(element)
+                }
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                switch self {
+                case .string(let v):
+                    try container.encode(StringElement.elementName, forKey: .element)
+                    try container.encode(v, forKey: .content)
+                case .number(let v):
+                    try container.encode(NumberElement.elementName, forKey: .element)
+                    try container.encode(v, forKey: .content)
+                case .array(let v):
+                    try container.encode("array", forKey: .element)
+                    try container.encodeIfPresent(v.map {AnyElement(element: $0)}, forKey: .content)
+                case .id(let v):
+                    try container.encode(v, forKey: .element)
+                case .indirect(let t):
+                    try container.encode(t, forKey: .element)
+                }
+            }
+        }
+    }
+}
+extension Dictionary where Key == String, Value == String {
+    init(_ members: [MemberElement]) {
+        self = members.reduce(into: [:]) {
+            guard case let .string(s) = $1.content.value else { return }
+            $0[$1.name] = s
+        }
     }
 }
 
-typealias APIBlueprintAST = ParseResultElement
-extension APIBlueprintAST {
-    var resourceGroup: CategoryElement? {
-        content.first {$0.element == "resourceGroup"}
-            .flatMap {try? JSONEncoder().encode($0)}
-            .flatMap {try? JSONDecoder().decode(CategoryElement.self, from: $0)}
+struct AnyElement: Codable, Equatable {
+    var element: String
+}
+
+struct StringElement: SimpleTypedElement {
+    static let elementName = "string"
+    var element: String
+    var content: String
+}
+
+struct NumberElement: SimpleTypedElement {
+    static let elementName = "number"
+    var element: String
+    var content: Double
+}
+
+struct CopyElement: SimpleTypedElement {
+    static var elementName = "copy"
+    var element: String
+    var content: String
+}
+
+struct ResourceElement: TypedElement {
+    static let elementName = "resource"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: Attributes
+    var content: [Content]
+
+    var copy: CopyElement? {
+        content.lazy.compactMap {
+            guard case let .copy(x) = $0 else { return nil }
+            return x
+        }.first
+    }
+
+    var transitions: [TransitionElement] {
+        content.reduce(into: []) {
+            guard case let .transition(x) = $1 else { return }
+            $0.append(x)
+        }
+    }
+    
+    var dataStructures: [DataStructureElement] {
+        content.reduce(into: []) {
+            guard case let .dataStructure(x) = $1 else { return }
+            $0.append(x)
+        }
+    }
+
+    struct Attributes: Codable, Equatable {
+        var href: String
+    }
+
+    enum Content: Codable, Equatable {
+        case copy(CopyElement)
+        case transition(TransitionElement)
+        case dataStructure(DataStructureElement)
+
+        enum CodingKeys: String, CodingKey {
+            case element
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            switch element {
+            case CopyElement.elementName:
+                self = .copy(try CopyElement(from: decoder))
+            case TransitionElement.elementName:
+                self = .transition(try TransitionElement(from: decoder))
+            case DataStructureElement.elementName:
+                self = .dataStructure(try DataStructureElement(from: decoder))
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .copy(let e): try e.encode(to: encoder)
+            case .transition(let e): try e.encode(to: encoder)
+            case .dataStructure(let e): try e.encode(to: encoder)
+            }
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.element = try container.decode(String.self, forKey: .element)
+        guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
+        self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
+        self.attributes = try container.decode(Attributes.self, forKey: .attributes)
+        self.content = try container.decode([Content].self, forKey: .content)
+    }
+}
+extension ResourceElement {
+    func href(transition: TransitionElement, request: HTTPRequestElement) -> String {
+        request.attributes.href ?? transition.attributes?.href ?? attributes.href
     }
 }
 
-//// MARK: - top-level
-//
-//protocol APIBlueprintASTElement: Decodable {
-//    static var apiBlueprintASTElementName: String { get }
-//}
-//extension APIBlueprintASTElement {
-//    init(from decoder: Decoder) throws {
-//        let parsed = try Element<Self>(from: decoder)
-//        guard parsed.element == Self.apiBlueprintASTElementName else {
-//            throw DecodingError.valueNotFound(Self.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "expect elemenet = \"\(Self.apiBlueprintASTElementName)\" but got element = \"\(parsed.element)\")"))
-//        }
-//        self = parsed.content
-//    }
-//}
-//protocol APIBlueprintASTCategory: APIBlueprintASTElement {
-//    static var apiBlueprintASTClassName: String { get }
-//}
-//extension APIBlueprintCategory {
-//    init(from decoder: Decoder) throws {
-//        let parsed = try Element<Self>(from: decoder)
-//        guard parsed.element == "category" else {
-//            throw DecodingError.valueNotFound(Self.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "expect elemenet = \"\("category")\" but got element = \"\(parsed.element)\")"))
-//        }
-//        self = parsed.content
-//    }
-//}
-//
-//struct Element<T: APIBlueprintASTElement>: Decodable {
-//    var element: String
-//    var meta: Meta
-//    var attributes: Attributes
-//    var content: T
-//}
-//
-//struct Meta: Codable {
-//    var classes: [String]
-//    var title: String?
-//}
-//
-//struct Attributes: Codable {
-//    var meta: [Meta]
-//}
-//
-//struct APIBlueprintAST: APIBlueprintASTElement {
-//    static let apiBlueprintASTElementName = "parseResult"
-//    var api: APIBlueprintAPI
-//    var annotations: [APIBluprintAnnotation]
-//}
-//
-//// MARK: - Categories
-//
-//struct APIBlueprintAPI: APIBlueprintASTCategory {
-//    static let apiBlueprintASTClassName = "api"
-//    private var meta: Meta?
-//    var title: String? {meta?.title}
-//    var resourceGroup: [APIBlueprintResourceGroup]
-//    var dataStructures: [APIBlueprintDataStructure]
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintAPI {
-//        return try APIBlueprintAPI(
-//            title: e <|? ["meta", "title"],
-//            resourceGroup: APIBlueprintResourceGroup.decodeElements(e),
-//            dataStructures: APIBlueprintDataStructures.decodeElements(e).flatMap {
-//                $0.dataStructures
-//        })
-//    }
-//}
-//
-//struct APIBlueprintResourceGroup: APIBlueprintCategoryDecodable {
-//    static let className = "resourceGroup"
-//    let title: String?
-//    let resources: [Resource]
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintResourceGroup {
-//        return try APIBlueprintResourceGroup(
-//            title: e <|? ["meta", "title"],
-//            resources: Resource.decodeElements(e))
-//    }
-//
-//    struct Resource: APIBlueprintElementDecodable {
-//        static let elementName = "resource"
-//        let title: String?
-//        let attributes: Attributes?
-//        let transitions: [APIBlueprintTransition]
-//
-//        static func decode(_ e: Extractor) throws -> Resource {
-//            return try Resource(
-//                title: e <|? ["meta", "title"],
-//                attributes: e <|? "attributes",
-//                transitions: APIBlueprintTransition.decodeElements(e))
-//        }
-//
-//        struct Attributes: Himotoki.Decodable {
-//            let href: String?
-//            static func decode(_ e: Extractor) throws -> APIBlueprintResourceGroup.Resource.Attributes {
-//                return try Attributes(href: e <|? "href")
-//            }
-//        }
-//
-//        func href(transition: APIBlueprintTransition, request: APIBlueprintTransition.Transaction.Request) throws -> String {
-//            // cascade
-//            guard let href = request.href ?? transition.attributes?.href ?? attributes?.href else { throw ConversionError.undefined }
-//            return href
-//        }
-//    }
-//}
-//
-//struct APIBlueprintDataStructures: APIBlueprintCategoryDecodable {
-//    static let className = "dataStructures"
-//    let dataStructures: [APIBlueprintDataStructure]
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintDataStructures {
-//        return try APIBlueprintDataStructures(
-//            dataStructures: APIBlueprintDataStructure.decodeElements(e))
-//    }
-//}
-//
-//// MARK: - Elements
-//
-//struct APIBlueprintCopy: APIBlueprintElementDecodable {
-//    static let elementName = "copy"
-//    let text: String
-//    static func decode(_ e: Extractor) throws -> APIBlueprintCopy {
-//        return try APIBlueprintCopy(text: e <| "content")
-//    }
-//}
-//
-//struct APIBlueprintTransition: APIBlueprintElementDecodable {
-//    static let elementName = "transition"
-//
-//    let meta: APIBlueprintMeta?
-//    var title: String? {return meta?.title}
-//
-//    let copy: APIBlueprintCopy?
-//
-//    let attributes: Attributes?
-//    func href(request: Transaction.Request) throws -> String {
-//        guard let href = request.href ?? attributes?.href else { throw ConversionError.undefined }
-//        return href
-//    }
-//    let httpTransactions: [Transaction]
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintTransition {
-//        return try APIBlueprintTransition(
-//            meta: e <|? "meta",
-//            copy: APIBlueprintCopy.decodeElementOptional(e),
-//            attributes: e <|? "attributes",
-//            httpTransactions: Transaction.decodeElements(e))
-//    }
-//
-//    struct Attributes: Himotoki.Decodable {
-//        let href: String?
-//        let hrefVariables: HrefVariables?
-//
-//        static func decode(_ e: Extractor) throws -> Attributes {
-//            return try Attributes(
-//                href: e <|? "href",
-//                hrefVariables: HrefVariables.decodeElementOptional(e, key: HrefVariables.elementName))
-//        }
-//
-//        struct HrefVariables: APIBlueprintElementDecodable {
-//            static let elementName = "hrefVariables"
-//            let members: [APIBlueprintMember]
-//            static func decode(_ e: Extractor) throws -> HrefVariables {
-//                return try HrefVariables(members: APIBlueprintMember.decodeElements(e))
-//            }
-//        }
-//    }
-//
-//    struct Transaction: APIBlueprintElementDecodable {
-//        static let elementName = "httpTransaction"
-//        let request: Request // currently supports single request per transaction
-//        let responses: [Response]
-//
-//        static func decode(_ e: Extractor) throws -> Transaction {
-//            return try Transaction(
-//                request: Request.decodeElement(e),
-//                responses: Response.decodeElements(e))
-//        }
-//
-//        struct Request: APIBlueprintElementDecodable {
-//            static let elementName = "httpRequest"
-//            let method: String
-//            let href: String? // nil indicates transition.href should be used
-//            let headers: Headers?
-//            let dataStructure: APIBlueprintDataStructure?
-//
-//            static func decode(_ e: Extractor) throws -> Request {
-//                return try Request(
-//                    method:  e <| ["attributes", "method"],
-//                    href:  e <|? ["attributes", "href"],
-//                    headers: e <|? ["attributes", "headers"],
-//                    dataStructure: {do {return try APIBlueprintDataStructure.decodeElement(e)} catch DecodeError.custom {return nil}}())
-//            }
-//        }
-//
-//        struct Response: APIBlueprintElementDecodable {
-//            static let elementName = "httpResponse"
-//            let statusCode: Int // multiple Responses are identified by pair (statusCode, contentType) for a single Request
-//            let headers: Headers?
-//            let contentType: String?
-//            let dataStructure: APIBlueprintDataStructure?
-//
-//            static func decode(_ e: Extractor) throws -> Response {
-//                guard let statusCode = ((try e <|? ["attributes", "statusCode"]).flatMap {Int($0)}) else {
-//                    throw ConversionError.undefined
-//                }
-//                let headers: Headers? = try e <|? ["attributes", "headers"]
-//
-//                return try Response(
-//                    statusCode: statusCode,
-//                    headers: headers,
-//                    contentType: headers?.contentType?.value,
-//                    dataStructure: APIBlueprintDataStructure.decodeElementOptional(e))
-//            }
-//        }
-//
-//        struct Headers: Himotoki.Decodable {
-//            static let elementName = "httpHeaders"
-//            let members: [APIBlueprintMember]
-//            static func decode(_ e: Extractor) throws -> Headers {
-//                return try Headers(members: APIBlueprintMember.decodeElements(e))
-//            }
-//            var dictionary: [String: String] {
-//                var d = [String: String]()
-//                members.forEach {
-//                    guard $0.content.name != "Content-Type" else { return } // ignore Content-Type
-//                    d[$0.content.name] = $0.content.value
-//                }
-//                return d
-//            }
-//            var contentType: APIBlueprintMemberContent? {
-//                return members.map {$0.content}.first {$0.name == "Content-Type"}
-//            }
-//        }
-//    }
-//}
-//
-//struct APIBlueprintElement: Himotoki.Decodable {
-//    let element: String
-//    let meta: APIBlueprintMeta?
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintElement {
-//        return try APIBlueprintElement(
-//            element: e <| "element",
-//            meta: e <|? "meta")
-//    }
-//}
-//
-//struct APIBlueprintMeta: Himotoki.Decodable {
-//    let classes: [String]?
-//    let id: String?
-//    let description: String?
-//    let title: String?
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintMeta {
-//        return try APIBlueprintMeta(
-//            classes: e <||? "classes",
-//            id: e <|? "id",
-//            description: e <|? "description",
-//            title: e <|? "title")
-//    }
-//}
-//
-//struct APIBlueprintMember: APIBlueprintElementDecodable {
-//    static let elementName = "member"
-//    let meta: APIBlueprintMeta?
-//    let typeAttributes: [String]?
-//    var required: Bool {return typeAttributes?.contains("required") == true}
-//    let content: APIBlueprintMemberContent
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintMember {
-//        return try APIBlueprintMember(
-//            meta: e <|? "meta",
-//            typeAttributes: e <||? ["attributes", "typeAttributes"],
-//            content: e <| "content")
-//    }
-//}
-//
-//struct APIBlueprintStringElement: APIBlueprintElementDecodable {
-//    static let elementName = "string"
-//    let value: String
-//    static func decode(_ e: Extractor) throws -> APIBlueprintStringElement {
-//        return try APIBlueprintStringElement(value: e <| "content")
-//    }
-//}
-//
-//struct APIBlueprintMemberContent: Himotoki.Decodable {
-//    let name: String
-//    let type: APIBlueprintMemberType
-//    let value: String? // value, 42, [value], ...
-//    let displayValue: String? // "value", 42, ["value"], ...
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintMemberContent {
-//        let value: String?
-//        let displayValue: String?
-//        let type: APIBlueprintMemberType = try e <| "value"
-//        switch type {
-//        case .exact("string"):
-//            let string: String? = try e <|? ["value", "content"]
-//            value = string
-//            displayValue = value.map {"\"" + $0 + "\""}
-//        case .exact("number"):
-//            let number: Int? = try e <|? ["value", "content"]
-//            value = number.map {String($0)}
-//            displayValue = value
-//        case .array:
-//            let contents = try StringArrayValue.decodeElement(e, key: "value").content
-//            value = "[" + contents.map {$0.value}.joined(separator: ", ") + "]"
-//            displayValue = "[" + contents.map {"\"" + $0.value + "\""}.joined(separator: ", ") + "]"
-//        case .exact("enum"):
-//            throw ConversionError.notSupported("\(type) at \(self)")
-//        case .indirect:
-//            throw ConversionError.undefined
-//        case let .exact(id):
-//            value = id
-//            displayValue = value
-//        }
-//
-//        return try APIBlueprintMemberContent(
-//            name: e <| ["key", "content"],
-//            type: type,
-//            value: value,
-//            displayValue: displayValue)
-//    }
-//
-//    struct StringArrayValue: APIBlueprintElementDecodable {
-//        static let elementName = "array"
-//        let content: [APIBlueprintStringElement]
-//        static func decode(_ e: Extractor) throws -> StringArrayValue {
-//            return try StringArrayValue(content: APIBlueprintStringElement.decodeElements(e))
-//        }
-//    }
-//}
-//
-//enum APIBlueprintMemberType: Himotoki.Decodable {
-//    case exact(String)
-//    case array(String?)
-//    case indirect(String)
-//
-//    var isArray: Bool {
-//        switch self {
-//        case .exact: return false
-//        case .array: return true
-//        case .indirect: return false
-//        }
-//    }
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintMemberType {
-//        let raw: String = try e <| "element"
-//        switch raw {
-//        case "array":
-//            let contentTypes: [APIBlueprintAnyElement] = try e <|| "content"
-//            return .array(contentTypes.first?.element)
-//        default:
-//            return .exact(raw)
-//        }
-//    }
-//}
-//
-//struct APIBlueprintAnyElement: Himotoki.Decodable {
-//    let element: String
-//    static func decode(_ e: Extractor) throws -> APIBlueprintAnyElement {
-//        return try APIBlueprintAnyElement(element: e <| "element")
-//    }
-//}
-//
-//enum APIBlueprintDataStructure: APIBlueprintElementDecodable {
-//    static let elementName = "dataStructure"
-//
-//    case named(id: String, members: [APIBlueprintMember])
-//    case anonymous(members: [APIBlueprintMember])
-//    case ref(id: String)
-//
-//    var id: String? {
-//        switch self {
-//        case .named(let id, _): return id
-//        case .ref(let id): return id
-//        case .anonymous: return nil
-//        }
-//    }
-//
-//    var rawType: String {
-//        switch self {
-//        case .named(let id, _): return id
-//        case .ref(let id): return id
-//        case .anonymous: return "object"
-//        }
-//    }
-//
-//    var members: [APIBlueprintMember] {
-//        switch self {
-//        case .named(_, let members): return members
-//        case .anonymous(let members): return members
-//        case .ref: return []
-//        }
-//    }
-//
-//    static func decode(_ e: Extractor) throws -> APIBlueprintDataStructure {
-//        guard let content: APIBlueprintElement = try (e <|| "content").first else {
-//            throw ConversionError.unknownDataStructure
-//        }
-//        if let id = content.meta?.id {
-//            return .named(id: id, members: try APIBlueprintMember.decodeElementsOfContents(e))
-//        }
-//        if content.element == "object" {
-//            return .anonymous(members: try APIBlueprintMember.decodeElementsOfContents(e))
-//        }
-//        return .ref(id: content.element)
-//    }
-//}
-//
-//struct APIBluprintAnnotation: APIBlueprintElementDecodable {
-//    static let elementName = "annotation"
-//
-//    static func decode(_ e: Extractor) throws -> APIBluprintAnnotation {
-//        return APIBluprintAnnotation()
-//    }
-//}
+struct TransitionElement: TypedElement {
+    static let elementName = "transition"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: Attributes?
+    var content: [Content]
+
+    var copy: CopyElement? {
+        content.lazy.compactMap {
+            guard case let .copy(x) = $0 else { return nil }
+            return x
+        }.first
+    }
+
+    var transactions: [HTTPTransactionElement] {
+        content.reduce(into: []) {
+            guard case let .transaction(x) = $1 else { return }
+            $0.append(x)
+        }
+    }
+
+    struct Attributes: Codable, Equatable {
+        var href: String?
+        var hrefVariables: HrefVariables?
+        struct HrefVariables: SimpleTypedElement {
+            static let elementName = "hrefVariables"
+            var element: String
+            var content: [MemberElement]
+        }
+    }
+
+    enum Content: Codable, Equatable {
+        case copy(CopyElement)
+        case transaction(HTTPTransactionElement)
+
+        enum CodingKeys: String, CodingKey {
+            case element
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            switch element {
+            case CopyElement.elementName:
+                self = .copy(try CopyElement(from: decoder))
+            case HTTPTransactionElement.elementName:
+                self = .transaction(try HTTPTransactionElement(from: decoder))
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .copy(let e): try e.encode(to: encoder)
+            case .transaction(let e): try e.encode(to: encoder)
+            }
+        }
+    }
+}
+
+struct HTTPTransactionElement: SimpleTypedElement {
+    static let elementName = "httpTransaction"
+    var element: String
+    var content: [RequestResponse]
+
+    /// NOTE: currently supports single request per transaction
+    var request: HTTPRequestElement? {
+        content.lazy.compactMap {
+            guard case let .httpRequest(x) = $0 else { return nil }
+            return x
+        }.first
+    }
+    var responses: [HTTPResponseElement] {
+        content.reduce(into: []) {
+            guard case let .httpResponse(x) = $1 else { return }
+            $0.append(x)
+        }
+    }
+
+    enum RequestResponse: Codable, Equatable {
+        case httpRequest(HTTPRequestElement)
+        case httpResponse(HTTPResponseElement)
+
+        enum CodingKeys: String, CodingKey {
+            case element
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            switch element {
+            case HTTPRequestElement.elementName: self = .httpRequest(try HTTPRequestElement(from: decoder))
+            case HTTPResponseElement.elementName: self = .httpResponse(try HTTPResponseElement(from: decoder))
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .httpRequest(let e): try e.encode(to: encoder)
+            case .httpResponse(let e): try e.encode(to: encoder)
+            }
+        }
+    }
+}
+
+struct HTTPRequestElement: TypedElement {
+    static let elementName = "httpRequest"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: Attributes
+    var content: [Content]
+
+    var dataStructure: DataStructureElement? {
+        content.lazy.compactMap {
+            guard case let .dataStructure(x) = $0 else { return nil }
+            return x
+        }.first
+    }
+
+    struct Attributes: Codable, Equatable {
+        var method: Method
+        var href: String? // nil indicates transition.href should be used
+        var headers: HTTPHeadersElement?
+        enum Method: String, Codable, Equatable {
+            case GET = "GET"
+            case POST = "POST"
+        }
+    }
+
+    enum Content: Codable, Equatable {
+        case asset(AssetElement)
+        case dataStructure(DataStructureElement)
+
+        enum CodingKeys: String, CodingKey {
+            case element
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            switch element {
+            case AssetElement.elementName: self = .asset(try AssetElement(from: decoder))
+            case DataStructureElement.elementName: self = .dataStructure(try DataStructureElement(from: decoder))
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .asset(let e): try e.encode(to: encoder)
+            case .dataStructure(let e): try e.encode(to: encoder)
+            }
+        }
+    }
+}
+
+struct HTTPResponseElement: TypedElement {
+    static let elementName = "httpResponse"
+    var element: String
+    var attributes: Attributes
+    var content: [Content]
+
+    var dataStructure: DataStructureElement? {
+        content.lazy.compactMap {
+            guard case let .dataStructure(x) = $0 else { return nil }
+            return x
+        }.first
+    }
+
+    struct Attributes: Codable, Equatable {
+        var statusCode: Int
+        var headers: HTTPHeadersElement?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            guard let statusCode = Int(try container.decode(String.self, forKey: .statusCode)) else {
+                throw DecodingError.typeMismatch(Int.self, DecodingError.Context(codingPath: container.codingPath + [CodingKeys.statusCode], debugDescription: "statusCode is expected a String representing an Int"))
+            }
+            self.statusCode = statusCode
+            self.headers = try container.decodeIfPresent(HTTPHeadersElement.self, forKey: .headers)
+        }
+    }
+
+    enum Content: Codable, Equatable {
+        case asset(AssetElement)
+        case dataStructure(DataStructureElement)
+
+        enum CodingKeys: String, CodingKey {
+            case element
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            switch element {
+            case AssetElement.elementName: self = .asset(try AssetElement(from: decoder))
+            case DataStructureElement.elementName: self = .dataStructure(try DataStructureElement(from: decoder))
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .asset(let e): try e.encode(to: encoder)
+            case .dataStructure(let e): try e.encode(to: encoder)
+            }
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.element = try container.decode(String.self, forKey: .element)
+        guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
+        self.attributes = try container.decode(Attributes.self, forKey: .attributes)
+        self.content = try container.decode([Content].self, forKey: .content)
+    }
+}
+
+struct HTTPHeadersElement: SimpleTypedElement {
+    static let elementName = "httpHeaders"
+    var element: String
+    var content: [MemberElement]
+    var contentType: String? {
+        guard case let .string(x) = (content.first {$0.name == "Content-Type"}?.content.value) else { return nil }
+        return x
+    }
+}
+
+struct AssetElement: TypedElement {
+    static let elementName = "asset"
+    var element: String
+    var meta: APIElements.Meta?
+    var attributes: Attributes
+    var content: String
+
+    struct Attributes: Codable, Equatable {
+        var contentType: String?
+    }
+}
