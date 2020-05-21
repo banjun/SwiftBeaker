@@ -5,7 +5,7 @@ public struct Core {
     public static func main(file: String, public: Bool) throws {
         let d = try Data(contentsOf: URL(fileURLWithPath: file))
         let ast = try JSONDecoder().decode(APIBlueprintAST.self, from: d)
-        let resources = ast.api!.resourceGroups.flatMap {$0.content}
+        let resources = ast.api!.resourceGroups.flatMap {$0.resources}
 //        print(resources)
         let transitionsSwift = try resources.flatMap { r in
             try r.transitions.map {try $0.swift(r, public: `public`)}

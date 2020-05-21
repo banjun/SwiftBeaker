@@ -156,7 +156,7 @@ struct APICategoryElement: TypedElement, Equatable {
                     throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown category element classes found at \(decoder.codingPath): \(classes)"))
                 }
             default:
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element: \(element)"))
             }
         }
 
@@ -194,7 +194,43 @@ struct ResourceGroupCategoryElement: TypedElement {
     var element: String
     var meta: APIElements.Meta?
     var attributes: APIElements.Attributes?
-    var content: [ResourceElement]
+    var content: [Content]
+
+    var resources: [ResourceElement] {
+        content.compactMap {
+            guard case let .resource(x) = $0 else { return nil }
+            return x
+        }
+    }
+
+    enum Content: Codable, Equatable {
+        case copy(CopyElement)
+        case resource(ResourceElement)
+
+        enum CodingKeys: String, CodingKey {
+            case element
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let element = try container.decode(String.self, forKey: .element)
+            switch element {
+            case CopyElement.elementName:
+                self = .copy(try CopyElement(from: decoder))
+            case ResourceElement.elementName:
+                self = .resource(try ResourceElement(from: decoder))
+            default:
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element: \(element)"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .copy(let e): try e.encode(to: encoder)
+            case .resource(let e): try e.encode(to: encoder)
+            }
+        }
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -203,7 +239,7 @@ struct ResourceGroupCategoryElement: TypedElement {
         self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
         guard (self.meta?.classes ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classes ?? [])")) }
         self.attributes = try container.decodeIfPresent(APIElements.Attributes.self, forKey: .attributes)
-        self.content = try container.decode([ResourceElement].self, forKey: .content)
+        self.content = try container.decode([Content].self, forKey: .content)
     }
 }
 
@@ -485,7 +521,7 @@ struct ResourceElement: TypedElement {
             case DataStructureElement.elementName:
                 self = .dataStructure(try DataStructureElement(from: decoder))
             default:
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element: \(element)"))
             }
         }
 
@@ -561,7 +597,7 @@ struct TransitionElement: TypedElement {
             case HTTPTransactionElement.elementName:
                 self = .transaction(try HTTPTransactionElement(from: decoder))
             default:
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element: \(element)"))
             }
         }
 
@@ -608,7 +644,7 @@ struct HTTPTransactionElement: SimpleTypedElement {
             case HTTPRequestElement.elementName: self = .httpRequest(try HTTPRequestElement(from: decoder))
             case HTTPResponseElement.elementName: self = .httpResponse(try HTTPResponseElement(from: decoder))
             default:
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element: \(element)"))
             }
         }
 
@@ -640,8 +676,11 @@ struct HTTPRequestElement: TypedElement {
         var href: String? // nil indicates transition.href should be used
         var headers: HTTPHeadersElement?
         enum Method: String, Codable, Equatable {
-            case GET = "GET"
-            case POST = "POST"
+            case GET
+            case POST
+            case PUT
+            case DELETE
+            case PATCH
         }
     }
 
@@ -660,7 +699,7 @@ struct HTTPRequestElement: TypedElement {
             case AssetElement.elementName: self = .asset(try AssetElement(from: decoder))
             case DataStructureElement.elementName: self = .dataStructure(try DataStructureElement(from: decoder))
             default:
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element: \(element)"))
             }
         }
 
@@ -701,6 +740,7 @@ struct HTTPResponseElement: TypedElement {
     }
 
     enum Content: Codable, Equatable {
+        case copy(CopyElement)
         case asset(AssetElement)
         case dataStructure(DataStructureElement)
 
@@ -712,15 +752,17 @@ struct HTTPResponseElement: TypedElement {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             let element = try container.decode(String.self, forKey: .element)
             switch element {
+            case CopyElement.elementName: self = .copy(try CopyElement(from: decoder))
             case AssetElement.elementName: self = .asset(try AssetElement(from: decoder))
             case DataStructureElement.elementName: self = .dataStructure(try DataStructureElement(from: decoder))
             default:
-                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown unknown element: \(element)"))
+                throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "unknown element: \(element)"))
             }
         }
 
         func encode(to encoder: Encoder) throws {
             switch self {
+            case .copy(let e): try e.encode(to: encoder)
             case .asset(let e): try e.encode(to: encoder)
             case .dataStructure(let e): try e.encode(to: encoder)
             }

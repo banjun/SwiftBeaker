@@ -25,7 +25,7 @@ class APIElementsTests: XCTestCase {
 
         let resourceGroups = apiCategory.resourceGroups
         let resourceGroup = resourceGroups[0]
-        let resource = resourceGroup.content[0]
+        let resource = resourceGroup.resources[0]
         XCTAssertEqual(resource.attributes.href, "/message")
 
         let transitions = resource.transitions
@@ -126,7 +126,7 @@ class APIElementsTests: XCTestCase {
         XCTAssertEqual(couponBaseMembers[1].content.value, .number(nil))
         XCTAssertEqual(couponBaseMembers[1].description, "Date after which the coupon can no longer be redeemed")
 
-        let resource = api.resourceGroups[0].content[0]
+        let resource = api.resourceGroups[0].resources[0]
         XCTAssertEqual(resource.attributes.href, "/coupons/{id}")
     }
 
