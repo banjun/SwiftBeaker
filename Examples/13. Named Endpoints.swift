@@ -96,22 +96,44 @@ public class Indirect<V: Codable>: Codable {
 
 // MARK: - Transitions
 
-
-struct GET__message: APIBlueprintRequest {
+/// Start out by creating a message for the world to see.
+struct Create_message: APIBlueprintRequest {
     let baseURL: URL
-    var method: HTTPMethod {return .get}
+    var method: HTTPMethod {return .post}
 
-    var path: String {return "/message"}
+    var path: String {return "/messages"}
 
     enum Responses {
-        case http200_text_plain(String)
+        case http201_(Void)
     }
 
     func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
-        case (200, "text/plain"?):
-            return .http200_text_plain(try string(from: object, urlResponse: urlResponse))
+        case (201, _):
+            return .http201_(try decodeJSON(from: object, urlResponse: urlResponse))
+        default:
+            throw ResponseError.undefined(urlResponse.statusCode, contentType)
+        }
+    }
+}
+
+/// Now create a task that you need to do at a later date.
+struct Create_a_new_task: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .post}
+
+    var path: String {return "/tasks"}
+
+    enum Responses {
+        case http201_(Void)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
+        switch (urlResponse.statusCode, contentType) {
+        case (201, _):
+            return .http201_(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }

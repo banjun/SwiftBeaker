@@ -237,7 +237,7 @@ extension TransitionElement: SwiftConvertible {
             context["extensions"] = ["APIBlueprintRequest"]
         }
         if let headers = (request.attributes.headers.map {[String: String]($0.content)}), !headers.isEmpty {
-            let headerVars = headers.map { (k, v) in
+            let headerVars = headers.filter {$0.key != "Content-Type"}.map { (k, v) in
                 ["key": k,
                  "name": k.lowercased().swiftIdentifierized(),
                  "type": "String",

@@ -378,7 +378,7 @@ struct MemberElement: TypedElement {
             switch value {
             case .string(let v): return v.map {"\"" + $0 + "\""}
             case .number(let v): return v.map {String($0)}
-            case .array(let t): return t.map {"[" + $0 + "]"}
+            case .array(_): return "[]"
             case .id(let v): return v
             case .indirect(let t): return t
             }
@@ -386,7 +386,7 @@ struct MemberElement: TypedElement {
 
         enum Value: Codable, Equatable {
             case string(String?)
-            case number(Double?)
+            case number(Int?) // should capable Int or Double
             case array(String?)
             case id(String)
 //            case `enum`([String]) // unsupported
@@ -408,7 +408,7 @@ struct MemberElement: TypedElement {
                 let element = try! container.decode(String.self, forKey: .element)
                 switch element {
                 case StringElement.elementName: self = .string(try container.decodeIfPresent(String.self, forKey: .content))
-                case NumberElement.elementName: self = .number(try container.decodeIfPresent(Double.self, forKey: .content))
+                case NumberElement.elementName: self = .number(try container.decodeIfPresent(Int.self, forKey: .content))
                 case "array":
                     let content = try container.decodeIfPresent([AnyElement].self, forKey: .content)
                     self = .array(content?.first?.element)
@@ -460,7 +460,7 @@ struct StringElement: SimpleTypedElement {
 struct NumberElement: SimpleTypedElement {
     static let elementName = "number"
     var element: String
-    var content: Double
+    var content: Int // should capable Int or Double
 }
 
 struct CopyElement: SimpleTypedElement {

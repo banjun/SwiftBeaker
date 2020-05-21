@@ -96,22 +96,69 @@ public class Indirect<V: Codable>: Codable {
 
 // MARK: - Transitions
 
-
-struct GET__message: APIBlueprintRequest {
+/// Gets a single note by its unique identifier.
+struct Get_a_note: APIBlueprintRequest {
     let baseURL: URL
     var method: HTTPMethod {return .get}
 
-    var path: String {return "/message"}
+    var path: String {return "/notes/{id}"}
 
     enum Responses {
-        case http200_text_plain(String)
+        case http200_application_json(Response200_application_json)
+        struct Response200_application_json: Codable { 
+            ///  ex. "abc123"
+            var id: String?
+            ///  ex. "This is a note"
+            var title: String?
+            ///  ex. "This is the note content."
+            var content: String?
+            ///  ex. []
+            var tags: [String]?
+        }
     }
 
     func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
-        case (200, "text/plain"?):
-            return .http200_text_plain(try string(from: object, urlResponse: urlResponse))
+        case (200, "application/json"?):
+            return .http200_application_json(try decodeJSON(from: object, urlResponse: urlResponse))
+        default:
+            throw ResponseError.undefined(urlResponse.statusCode, contentType)
+        }
+    }
+}
+
+/// Modify a note's data using its unique identifier. You can edit the `title`,
+/// `content`, and `tags`.
+struct Update_a_note: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .patch}
+
+    var path: String {return "/notes/{id}"}
+
+    let param: Param
+    var bodyParameters: BodyParameters? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? JSONBodyParameters(JSONObject: JSONSerialization.jsonObject(with: encoder.encode(param)))
+    }
+    struct Param: Codable { 
+        ///  ex. "This is another note"
+        var title: String?
+        /// 
+        var content: String?
+        ///  ex. []
+        var tags: [String]?
+    }
+    enum Responses {
+        case http204_(Void)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
+        switch (urlResponse.statusCode, contentType) {
+        case (204, _):
+            return .http204_(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
