@@ -50,7 +50,7 @@ private let stencilExtension: Extension = {
 }()
 private let stencilEnvironment = Environment(extensions: [stencilExtension])
 
-extension APIBlueprintDataStructure: SwiftConvertible {
+extension DataStructureElement.Content: SwiftConvertible {
     func swift(_ name: String? = nil, public: Bool) throws -> SwiftCode {
         let localDSTemplate = Template(templateString: """
 {{ public }}struct {{ name }}: Codable { {% for v in vars %}
@@ -75,7 +75,7 @@ extension APIBlueprintDataStructure: SwiftConvertible {
                     "type": m.swiftType,
                     "optional": optional,
                     "doc": m.swiftDoc,
-                    "decoder": (m.content.type.isArray ? "<||" : "<|") + optionalSuffix]}
+                    "decoder": (m.content.value.isArray ? "<||" : "<|") + optionalSuffix]}
 
         let localName = name.components(separatedBy: ".").last ?? name
         return (local: try localDSTemplate.render(["public": `public` ? "public " : "",
@@ -86,19 +86,19 @@ extension APIBlueprintDataStructure: SwiftConvertible {
     }
 }
 
-extension APIBlueprintTransition: SwiftConvertible {
-    func swift(_ resource: APIBlueprintResourceGroup.Resource, public: Bool) throws -> SwiftCode {
+extension TransitionElement: SwiftConvertible {
+    func swift(_ resource: ResourceElement, public: Bool) throws -> SwiftCode {
         var globalExtensionCode = ""
-        let request = httpTransactions.first!.request
+        let request = transactions.first!.request!
         let requestTypeName = try swiftRequestTypeName(request: request, resource: resource)
-        let href = try resource.href(transition: self, request: request)
+        let href = resource.href(transition: self, request: request)
         let otherTransitions = resource.transitions
 
-        func allResponses(method: String) throws -> [APIBlueprintTransition.Transaction.Response] {
-            return try otherTransitions
-                .flatMap {t in t.httpTransactions.map {(transition: t, transaction: $0)}}
-                .filter {try $0.transaction.request.method == method &&
-                    resource.href(transition: $0.transition, request: $0.transaction.request) == href}
+        func allResponses(method: String) -> [HTTPResponseElement] {
+            otherTransitions
+                .flatMap {t in t.transactions.map {(transition: t, transaction: $0)}}
+                .filter {$0.transaction.request?.attributes.method.rawValue == method &&
+                    resource.href(transition: $0.transition, request: $0.transaction.request!) == href}
                 .flatMap {$0.transaction.responses}
         }
 
@@ -166,22 +166,22 @@ extension APIBlueprintTransition: SwiftConvertible {
     }
 }
 """, environment: stencilEnvironment)
-        let siblingResponses = try allResponses(method: request.method)
+        let siblingResponses = allResponses(method: request.attributes.method.rawValue)
         let responseCases = try siblingResponses.map { r -> [String: Any] in
             let type: String
-            let contentTypeEscaped = (r.contentType ?? "").replacingOccurrences(of: "/", with: "_")
+            let contentTypeEscaped = (r.attributes.headers?.contentType ?? "").replacingOccurrences(of: "/", with: "_")
             let innerType: (local: String, global: String)?
-            switch r.dataStructure {
+            switch r.dataStructure?.content {
             case .anonymous?:
-                type = "Response\(r.statusCode)_\(contentTypeEscaped)"
-                innerType = try r.dataStructure!.swift("\(requestTypeName).Responses.\(type)", public: `public`)
+                type = "Response\(r.attributes.statusCode)_\(contentTypeEscaped)"
+                innerType = try r.dataStructure!.content.swift("\(requestTypeName).Responses.\(type)", public: `public`)
                 _ = innerType.map {globalExtensionCode += $0.global}
             case let .ref(id: id)?:
                 // external type (reference to type defined in Data Structures)
                 type = id
                 innerType = nil
             case nil:
-                switch r.contentType {
+                switch r.attributes.headers?.contentType {
                 case "text/plain"?, "text/html"?:
                     type = "String"
                     innerType = nil
@@ -191,14 +191,16 @@ extension APIBlueprintTransition: SwiftConvertible {
                 }
             case .named?:
                 throw ConversionError.unknownDataStructure
+            case .array?:
+                throw ConversionError.unknownDataStructure
             }
             var context: [String: String] = [
-                "statusCode": String(r.statusCode),
-                "contentType": r.contentType.map {"\"\($0)\"?"} ?? "_",
-                "case": "http\(r.statusCode)_\(contentTypeEscaped)",
+                "statusCode": String(r.attributes.statusCode),
+                "contentType": r.attributes.headers?.contentType.map {"\"\($0)\"?"} ?? "_",
+                "case": "http\(r.attributes.statusCode)_\(contentTypeEscaped)",
                 "type": type,
                 "decode": {
-                    switch r.contentType {
+                    switch r.attributes.headers?.contentType {
                     case nil, "application/json"?:
                         return "try decodeJSON(from: object, urlResponse: urlResponse)"
                     case "text/html"?, "text/plain"?:
@@ -218,12 +220,12 @@ extension APIBlueprintTransition: SwiftConvertible {
             "publicMemberwiseInit": `public`,
             "name": requestTypeName,
             "responseCases": responseCases,
-            "method": "." + request.method.lowercased(),
+            "method": "." + request.attributes.method.rawValue.lowercased(),
             "path": href
         ]
         if let hrefVariables = attributes?.hrefVariables {
-            let pathVars: [[String: Any]] = hrefVariables.members.map {
-                ["key": $0.content.name,
+            let pathVars: [[String: Any]] = hrefVariables.content.map {
+                ["key": $0.name,
                  "name": $0.swiftName,
                  "type": $0.swiftType,
                  "doc": $0.swiftDoc,
@@ -234,8 +236,8 @@ extension APIBlueprintTransition: SwiftConvertible {
         } else {
             context["extensions"] = ["APIBlueprintRequest"]
         }
-        if let headers = request.headers?.dictionary, !headers.isEmpty {
-            let headerVars = headers.map { (k, v) in
+        if let headers = (request.attributes.headers.map {[String: String]($0.content)}), !headers.isEmpty {
+            let headerVars = headers.filter {$0.key != "Content-Type"}.map { (k, v) in
                 ["key": k,
                  "name": k.lowercased().swiftIdentifierized(),
                  "type": "String",
@@ -243,76 +245,86 @@ extension APIBlueprintTransition: SwiftConvertible {
             }
             context["headerVars"] = headerVars
         }
-        switch request.dataStructure {
+        switch request.dataStructure?.content {
         case let .anonymous(members)?:
             // inner type
-            let ds = APIBlueprintDataStructure.anonymous(members: members)
+            let ds = DataStructureElement.Content.anonymous(members: members)
             context["paramType"] = "Param"
             let s = try ds.swift("\(requestTypeName).Param", public: `public`)
             globalExtensionCode += s.global
             context["structParam"] = s.local.indented(by: 4)
         case let .ref(id: id)?:
-            let ds = APIBlueprintDataStructure.ref(id: id)
+            let ds = DataStructureElement.Content.ref(id: id)
             // external type (reference to type defined in Data Structures)
             context["paramType"] = ds.id
         case .named?:
             throw ConversionError.notSupported("named DataStructure definition in a request param")
+        case .array?:
+            throw ConversionError.notSupported("array DataStructure definition in a request param")
         case nil:
-            if let requestContentType = request.headers?.contentType?.value, requestContentType.hasPrefix("text/") {
+            if let requestContentType = request.attributes.headers?.contentType, requestContentType.hasPrefix("text/") {
                 context["paramType"] = "String"
                 context["paramContentType"] = requestContentType
             }
         }
-        context["copy"] = copy?.text.docCommentPrefixed()
+        context["copy"] = copy?.content.docCommentPrefixed()
 
         return try (local: trTemplate.render(context), global: globalExtensionCode)
     }
 
 
-    func swiftRequestTypeName(request: Transaction.Request, resource: APIBlueprintResourceGroup.Resource) throws -> String {
-        if let title = title, let first = title.first {
+    func swiftRequestTypeName(request: HTTPRequestElement, resource: ResourceElement) throws -> String {
+        if let title = meta?.title, let first = title.first {
             return (String(first).uppercased() + String(title.dropFirst())).swiftIdentifierized()
         } else {
-            return try (request.method + "_" + resource.href(transition: self, request: request)).swiftIdentifierized()
+            return (request.attributes.method.rawValue + "_" + resource.href(transition: self, request: request)).swiftIdentifierized()
         }
     }
 }
 
-extension APIBlueprintMember {
-    var swiftName: String {return content.name.swiftIdentifierized()}
+extension MemberElement {
+    var swiftName: String {return name.swiftIdentifierized()}
     var swiftType: String {
         let name: String
-        switch content.type {
-        case let .exact(t):
-            name = t.swiftTypeMapped().swiftKeywordsEscaped()
-        case let .array(t):
+        switch content.value {
+        case .string:
+            name = "string".swiftTypeMapped().swiftKeywordsEscaped()
+        case .number:
+            name = "number".swiftTypeMapped().swiftKeywordsEscaped()
+        case .array(let t):
             name = "[" + (t.map {$0.swiftTypeMapped().swiftKeywordsEscaped()} ?? "Any") + "]"
-        case let .indirect(t):
+        case .id(let t):
+            name = t.swiftTypeMapped().swiftKeywordsEscaped()
+            // TODO: support indirect recursion
+        case .indirect(let t):
             name = "Indirect<\(t)>"
         }
         return name + (required ? "" : "?")
     }
     var swiftDoc: String {return [meta?.description, content.displayValue.map {" ex. " + $0}]
-        .flatMap {$0}
+        .compactMap {$0}
         .joined(separator: " ")
         .docCommentPrefixed()}
 
-    func memberAvoidingSwiftRecursiveStruct(parentTypes: [String]) throws -> APIBlueprintMember {
+    func memberAvoidingSwiftRecursiveStruct(parentTypes: [String]) throws -> MemberElement {
         let recursive = parentTypes.contains {
-            if case .exact($0) = content.type { return true } // currently support simple recursions
+            if case .id($0) = content.value { return true } // currently support simple recursions
             return false
         }
         guard recursive else { return self }
         guard !required else {
             throw ConversionError.notSupported("recursive data structure with required param")
         }
-        guard case let .exact(exactType) = content.type else {
+        guard case let .id(exactType) = content.value else {
             throw ConversionError.notSupported("recursive data structure with compound param")
         }
 
-        return APIBlueprintMember(
+        return MemberElement(
+            element: element,
             meta: meta,
-            typeAttributes: typeAttributes?.filter {$0 != "required"},
-            content: APIBlueprintMemberContent(name: content.name, type: .indirect(exactType), value: content.value, displayValue: content.displayValue))
+            attributes: Attributes(typeAttributes: attributes?.typeAttributes?.filter {$0 != "required"}),
+            content: .init(
+                key: content.key,
+                value: .indirect(exactType)))
     }
 }

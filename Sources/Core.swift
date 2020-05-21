@@ -1,16 +1,16 @@
 import Foundation
-import Himotoki
 import Stencil
 
-struct Core {
-    static func main(file: String, public: Bool) throws {
-        let j = try JSONSerialization.jsonObject(with: try Data(contentsOf: URL(fileURLWithPath: file)), options: [])
-        let ast = try APIBlueprintAST.decodeValue(j)
-        let resources = ast.api.resourceGroup.flatMap {$0.resources}
+public struct Core {
+    public static func main(file: String, public: Bool) throws {
+        let d = try Data(contentsOf: URL(fileURLWithPath: file))
+        let ast = try JSONDecoder().decode(APIBlueprintAST.self, from: d)
+        let resources = ast.api!.resourceGroups.flatMap {$0.resources}
+//        print(resources)
         let transitionsSwift = try resources.flatMap { r in
             try r.transitions.map {try $0.swift(r, public: `public`)}
         }
-        let dataStructuresSwift = try ast.api.dataStructures.map {try $0.swift(public: `public`)}
+        let dataStructuresSwift = try ast.api!.dataStructures.map {try $0.content.swift(public: `public`)}
 
         print(preamble)
         print("\n// MARK: - Transitions\n")

@@ -96,22 +96,45 @@ public class Indirect<V: Codable>: Codable {
 
 // MARK: - Transitions
 
-
-struct GET__message: APIBlueprintRequest {
+/// Gets a single note by its unique identifier.
+struct Get_a_note: APIBlueprintRequest {
     let baseURL: URL
     var method: HTTPMethod {return .get}
 
-    var path: String {return "/message"}
+    var path: String {return "/notes/{id}"}
 
     enum Responses {
-        case http200_text_plain(String)
+        case http200_application_json(Void)
     }
 
     func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
-        case (200, "text/plain"?):
-            return .http200_text_plain(try string(from: object, urlResponse: urlResponse))
+        case (200, "application/json"?):
+            return .http200_application_json(try decodeJSON(from: object, urlResponse: urlResponse))
+        default:
+            throw ResponseError.undefined(urlResponse.statusCode, contentType)
+        }
+    }
+}
+
+/// Modify a note's data using its unique identifier. You can edit the `title`,
+/// `content`, and `tags`.
+struct Update_a_note: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .patch}
+
+    var path: String {return "/notes/{id}"}
+
+    enum Responses {
+        case http204_(Void)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
+        switch (urlResponse.statusCode, contentType) {
+        case (204, _):
+            return .http204_(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }

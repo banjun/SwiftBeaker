@@ -96,8 +96,12 @@ public class Indirect<V: Codable>: Codable {
 
 // MARK: - Transitions
 
-
-struct GET__message: APIBlueprintRequest {
+/// In API Blueprint, _requests_ can hold exactly the same kind of information and
+/// can be described using exactly the same structure as _responses_, only with
+/// different signature – using the `Request` keyword. The string that follows
+/// after the `Request` keyword is a request identifier. Again, using explanatory
+/// and simple naming is the best way to go.
+struct Retrieve_a_Message: APIBlueprintRequest {
     let baseURL: URL
     var method: HTTPMethod {return .get}
 
@@ -105,6 +109,18 @@ struct GET__message: APIBlueprintRequest {
 
     enum Responses {
         case http200_text_plain(String)
+        case http200_application_json(Void)
+    }
+
+    var headerFields: [String: String] {return headerVars.context}
+    var headerVars: HeaderVars
+    struct HeaderVars: URITemplateContextConvertible {
+        /// text/plain
+        var accept: String
+
+        enum CodingKeys: String, CodingKey {
+            case accept = "Accept"
+        }
     }
 
     func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
@@ -112,6 +128,35 @@ struct GET__message: APIBlueprintRequest {
         switch (urlResponse.statusCode, contentType) {
         case (200, "text/plain"?):
             return .http200_text_plain(try string(from: object, urlResponse: urlResponse))
+        case (200, "application/json"?):
+            return .http200_application_json(try decodeJSON(from: object, urlResponse: urlResponse))
+        default:
+            throw ResponseError.undefined(urlResponse.statusCode, contentType)
+        }
+    }
+}
+
+
+struct Update_a_Message: APIBlueprintRequest {
+    let baseURL: URL
+    var method: HTTPMethod {return .put}
+
+    var path: String {return "/message"}
+
+    let param: String
+    var bodyParameters: BodyParameters? {return TextBodyParameters(contentType: "text/plain", content: param)}
+    enum Responses {
+        case http204_(Void)
+        case http204_(Void)
+    }
+
+    func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
+        let contentType = contentMIMEType(in: urlResponse)
+        switch (urlResponse.statusCode, contentType) {
+        case (204, _):
+            return .http204_(try decodeJSON(from: object, urlResponse: urlResponse))
+        case (204, _):
+            return .http204_(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }

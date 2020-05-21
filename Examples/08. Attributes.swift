@@ -96,22 +96,33 @@ public class Indirect<V: Codable>: Codable {
 
 // MARK: - Transitions
 
-
-struct GET__message: APIBlueprintRequest {
+/// Retrieves the coupon with the given ID.
+struct Retrieve_a_Coupon: APIBlueprintRequest {
     let baseURL: URL
     var method: HTTPMethod {return .get}
 
-    var path: String {return "/message"}
+    var path: String {return "/coupons/{id}"}
 
     enum Responses {
-        case http200_text_plain(String)
+        case http200_application_json(Response200_application_json)
+        struct Response200_application_json: Codable { 
+            ///  ex. "250FF"
+            var id: String
+            /// Time stamp  ex. 1415203908
+            var created: Int?
+            /// A positive integer between 1 and 100 that represents the discount
+        /// the coupon will apply.  ex. 25
+            var percent_off: Int?
+            /// Date after which the coupon can no longer be redeemed
+            var redeem_by: Int?
+        }
     }
 
     func response(from object: Any, urlResponse: HTTPURLResponse) throws -> Responses {
         let contentType = contentMIMEType(in: urlResponse)
         switch (urlResponse.statusCode, contentType) {
-        case (200, "text/plain"?):
-            return .http200_text_plain(try string(from: object, urlResponse: urlResponse))
+        case (200, "application/json"?):
+            return .http200_application_json(try decodeJSON(from: object, urlResponse: urlResponse))
         default:
             throw ResponseError.undefined(urlResponse.statusCode, contentType)
         }
