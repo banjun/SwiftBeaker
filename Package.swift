@@ -20,6 +20,6 @@ let package = Package(
             path: "Sources"),
         .testTarget(
             name: "SwiftBeakerTests",
-            dependencies: ["SwiftBeakerCore"]),
+            dependencies: ["SwiftBeaker", "SwiftBeakerCore"]),
     ]
 )

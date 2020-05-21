@@ -45,6 +45,70 @@ class APIElementsTests: XCTestCase {
         XCTAssertEqual(asset.content, "Hello World!\n")
     }
 
+    func test_02_Resource_and_Actions() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("02. Resource and Actions.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_03_Named_Resource_and_Actions() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("03. Named Resource and Actions.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_04_Grouping_Resources() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("04. Grouping Resources.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_05_Responses() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("05. Responses.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_06_Requests() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("06. Requests.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_07_Parameters() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("07. Parameters.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_08_Attributes() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("08. Attributes.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_09_Advanced_Attributes() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("09. Advanced Attributes.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
     func test_10_Data_Structures() {
         let result = try! JSONDecoder().decode(ParseResultElement.self, from: testdata("10. Data Structures.md.json"))
         let api = result.api!
@@ -64,6 +128,46 @@ class APIElementsTests: XCTestCase {
 
         let resource = api.resourceGroups[0].content[0]
         XCTAssertEqual(resource.attributes.href, "/coupons/{id}")
+    }
+
+    func test_11_Resource_Model() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("11. Resource Model.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_12_Advanced_Action() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("12. Advanced Action.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_13_Named_Endpoints() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("13. Named Endpoints.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_14_JSON_Schema() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("14. JSON Schema.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
+    }
+
+    func test_15_Advanced_JSON_Schema() {
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("15. Advanced JSON Schema.md.json"))
+        } catch {
+            XCTFail(String(describing: error))
+        }
     }
 
     func testTypeAttributes() {
