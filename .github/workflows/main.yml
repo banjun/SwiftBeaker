@@ -16,6 +16,8 @@ jobs:
     runs-on: macOS-latest
     steps:
     - uses: actions/checkout@v2
+    - run: brew install drafter
+    - run: for f in Tests/SwiftBeakerTests/Examples/*.md; do drafter -f json "$f" > "$f.json"; done
     - run: swift test
   podspec:
     runs-on: macOS-latest
