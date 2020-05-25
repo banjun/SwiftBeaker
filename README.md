@@ -28,7 +28,7 @@ debug
 release ([SwiftBeaker/releases](https://github.com/banjun/SwiftBeaker/releases))
 
 ```sh
-% swift build -c release -Xswiftc -static-stdlib
+% swift build -c release
 ```
 
 ## Usage
