@@ -11,38 +11,41 @@ func testdata(_ filename: String) -> Data {
 
 class APIElementsTests: XCTestCase {
     func test_01_Simplest_API() {
-        let result = try! JSONDecoder().decode(ParseResultElement.self, from: testdata("01. Simplest API.md.json"))
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("01. Simplest API.md.json"))
 
-        XCTAssertEqual(result.element, "parseResult")
-        XCTAssertEqual(result.content.count, 1)
+            XCTAssertEqual(result.element, "parseResult")
+            XCTAssertEqual(result.content.count, 1)
 
-        guard case let .api(apiCategory) = result.content[0] else { return XCTFail() }
-        XCTAssertEqual(apiCategory.element, "category")
-        XCTAssertEqual(apiCategory.meta?.classes, ["api"])
+            guard case let .api(apiCategory) = result.content[0] else { return XCTFail() }
+            XCTAssertEqual(apiCategory.element, "category")
+            XCTAssertEqual(apiCategory.meta?.classeNames, ["api"])
 
-        guard case let .copy(copy) = apiCategory.content[0] else { return XCTFail() }
-        XCTAssertTrue(copy.content.hasPrefix("This is one of the simplest APIs"))
+            guard case let .copy(copy) = apiCategory.content[0] else { return XCTFail() }
+            XCTAssertTrue(copy.content.hasPrefix("This is one of the simplest APIs"))
 
-        let resourceGroups = apiCategory.resourceGroups
-        let resourceGroup = resourceGroups[0]
-        let resource = resourceGroup.resources[0]
-        XCTAssertEqual(resource.attributes.href, "/message")
+            let resources = apiCategory.resources
+            let resource = resources[0]
+            XCTAssertEqual(resource.attributes.href.content, "/message")
 
-        let transitions = resource.transitions
-        XCTAssertEqual(transitions.count, 1)
-        let transition = transitions[0]
+            let transitions = resource.transitions
+            XCTAssertEqual(transitions.count, 1)
+            let transition = transitions[0]
 
-        let httpTransactions = transition.transactions
-        XCTAssertEqual(httpTransactions.count, 1)
-        let httpTransaction = httpTransactions[0]
+            let httpTransactions = transition.transactions
+            XCTAssertEqual(httpTransactions.count, 1)
+            let httpTransaction = httpTransactions[0]
 
-        guard case let .httpRequest(httpRequest) = httpTransaction.content[0] else { return XCTFail() }
-        XCTAssertEqual(httpRequest.attributes.method, .GET)
+            guard case let .httpRequest(httpRequest) = httpTransaction.content[0] else { return XCTFail() }
+            XCTAssertEqual(httpRequest.attributes.method.content, .GET)
 
-        guard case let .httpResponse(httpResponse) = httpTransaction.content[1] else { return XCTFail() }
+            guard case let .httpResponse(httpResponse) = httpTransaction.content[1] else { return XCTFail() }
 
-        guard case let .asset(asset) = httpResponse.content[0] else { return XCTFail() }
-        XCTAssertEqual(asset.content, "Hello World!\n")
+            guard case let .asset(asset) = httpResponse.content[0] else { return XCTFail() }
+            XCTAssertEqual(asset.content, "Hello World!\n")
+        } catch {
+            XCTFail(String(describing: error))
+        }
     }
 
     func test_02_Resource_and_Actions() {
@@ -110,24 +113,28 @@ class APIElementsTests: XCTestCase {
     }
 
     func test_10_Data_Structures() {
-        let result = try! JSONDecoder().decode(ParseResultElement.self, from: testdata("10. Data Structures.md.json"))
-        let api = result.api!
-        let dataStructures = api.dataStructures
-        XCTAssertEqual(dataStructures.count, 1)
+        do {
+            let result = try JSONDecoder().decode(ParseResultElement.self, from: testdata("10. Data Structures.md.json"))
+            let api = result.api!
+            let dataStructures = api.dataStructures
+            XCTAssertEqual(dataStructures.count, 1)
 
-        guard case .named(let couponBaseID, let couponBaseMembers, let couponBaseBaseRef) = dataStructures[0].content else { return XCTFail() }
-        XCTAssertEqual(couponBaseID, "Coupon Base")
-        XCTAssertEqual(couponBaseBaseRef, "object")
-        XCTAssertEqual(couponBaseMembers.count, 2)
-        XCTAssertEqual(couponBaseMembers[0].content.key.content, "percent_off")
-        XCTAssertEqual(couponBaseMembers[0].content.value, .number(25))
-        XCTAssertEqual(couponBaseMembers[0].description, "A positive integer between 1 and 100 that represents the discount the\ncoupon will apply.")
-        XCTAssertEqual(couponBaseMembers[1].content.key.content, "redeem_by")
-        XCTAssertEqual(couponBaseMembers[1].content.value, .number(nil))
-        XCTAssertEqual(couponBaseMembers[1].description, "Date after which the coupon can no longer be redeemed")
+            guard case .named(let couponBaseID, let couponBaseMembers, let couponBaseBaseRef) = dataStructures[0].content else { return XCTFail() }
+            XCTAssertEqual(couponBaseID, "Coupon Base")
+            XCTAssertEqual(couponBaseBaseRef, "object")
+            XCTAssertEqual(couponBaseMembers.count, 2)
+            XCTAssertEqual(couponBaseMembers[0].content.key.content, "percent_off")
+            XCTAssertEqual(couponBaseMembers[0].content.value, .number(25))
+            XCTAssertEqual(couponBaseMembers[0].description, "A positive integer between 1 and 100 that represents the discount the\ncoupon will apply.")
+            XCTAssertEqual(couponBaseMembers[1].content.key.content, "redeem_by")
+            XCTAssertEqual(couponBaseMembers[1].content.value, .number(nil))
+            XCTAssertEqual(couponBaseMembers[1].description, "Date after which the coupon can no longer be redeemed")
 
-        let resource = api.resourceGroups[0].resources[0]
-        XCTAssertEqual(resource.attributes.href, "/coupons/{id}")
+            let resource = api.resourceGroups[0].resources[0]
+            XCTAssertEqual(resource.attributes.href.content, "/coupons/{id}")
+        } catch {
+            XCTFail(String(describing: error))
+        }
     }
 
     func test_11_Resource_Model() {
@@ -175,12 +182,18 @@ class APIElementsTests: XCTestCase {
             {
                   "element": "member",
                   "meta": {
-                    "title": "ID"
+                    "title": {"element": "string", "content":"ID"}
                   },
                   "attributes": {
-                    "typeAttributes": [
-                      "required"
-                    ]
+                    "typeAttributes": {
+                      "element": "array",
+                      "content": [
+                        {
+                          "element": "string",
+                          "content": "required"
+                        }
+                      ]
+                    }
                   },
                   "content": {
                     "key": {
@@ -200,13 +213,19 @@ class APIElementsTests: XCTestCase {
             {
                   "element": "member",
                   "meta": {
-                    "description": "Text to be shown as a warning before the actual content",
-                    "title": "string"
+                    "description": {"element": "string", "content":"Text to be shown as a warning before the actual content"},
+                    "title": {"element": "string", "content": "string"}
                   },
                   "attributes": {
-                    "typeAttributes": [
-                      "optional"
-                    ]
+                    "typeAttributes": {
+                      "element": "array",
+                      "content": [
+                        {
+                          "element": "string",
+                          "content": "optional"
+                        }
+                      ]
+                    }
                   },
                   "content": {
                     "key": {
@@ -228,22 +247,28 @@ class APIElementsTests: XCTestCase {
             {
               "element": "transition",
               "meta": {
-                "title": "GetAccount"
+                "title": {"element": "string", "content": "GetAccount"}
               },
               "attributes": {
-                "href": "/api/v1/accounts/{id}",
+                "href": {"element": "string", "content": "/api/v1/accounts/{id}"},
                 "hrefVariables": {
                   "element": "hrefVariables",
                   "content": [
                     {
                       "element": "member",
                       "meta": {
-                        "title": "string"
+                        "title": {"element": "string", "content": "string"}
                       },
                       "attributes": {
-                        "typeAttributes": [
-                          "required"
-                        ]
+                        "typeAttributes": {
+                          "element": "array",
+                          "content": [
+                            {
+                              "element": "string",
+                              "content": "required"
+                            }
+                          ]
+                        }
                       },
                       "content": {
                         "key": {
@@ -261,7 +286,7 @@ class APIElementsTests: XCTestCase {
               "content": []
             }
         """.data(using: .utf8)!)
-        XCTAssertEqual(transition.attributes?.href, "/api/v1/accounts/{id}")
+        XCTAssertEqual(transition.attributes?.href?.content, "/api/v1/accounts/{id}")
         XCTAssertEqual(transition.attributes?.hrefVariables?.content[0].name, "id")
         XCTAssertEqual(transition.attributes?.hrefVariables?.content[0].required, true)
         XCTAssertEqual(transition.attributes?.hrefVariables?.content[0].content.value, .string(nil))
@@ -272,7 +297,7 @@ class APIElementsTests: XCTestCase {
         {
             "element": "httpRequest",
             "attributes": {
-              "method": "POST",
+              "method": {"element": "string", "content": "POST"},
               "headers": {
                 "element": "httpHeaders",
                 "content": [

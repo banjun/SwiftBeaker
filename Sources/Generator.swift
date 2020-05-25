@@ -68,14 +68,12 @@ extension DataStructureElement.Content: SwiftConvertible {
             .map {try $0.memberAvoidingSwiftRecursiveStruct(parentTypes: [name])}
             .map { m in
                 let optional = !m.required
-                let optionalSuffix = optional ? "?" : ""
 
                 return [
                     "name": m.swiftName,
                     "type": m.swiftType,
                     "optional": optional,
-                    "doc": m.swiftDoc,
-                    "decoder": (m.content.value.isArray ? "<||" : "<|") + optionalSuffix]}
+                    "doc": m.swiftDoc]}
 
         let localName = name.components(separatedBy: ".").last ?? name
         return (local: try localDSTemplate.render(["public": `public` ? "public " : "",
@@ -97,7 +95,7 @@ extension TransitionElement: SwiftConvertible {
         func allResponses(method: String) -> [HTTPResponseElement] {
             otherTransitions
                 .flatMap {t in t.transactions.map {(transition: t, transaction: $0)}}
-                .filter {$0.transaction.request?.attributes.method.rawValue == method &&
+                .filter {$0.transaction.request?.attributes.method.content.rawValue == method &&
                     resource.href(transition: $0.transition, request: $0.transaction.request!) == href}
                 .flatMap {$0.transaction.responses}
         }
@@ -166,7 +164,7 @@ extension TransitionElement: SwiftConvertible {
     }
 }
 """, environment: stencilEnvironment)
-        let siblingResponses = allResponses(method: request.attributes.method.rawValue)
+        let siblingResponses = allResponses(method: request.attributes.method.content.rawValue)
         let responseCases = try siblingResponses.map { r -> [String: Any] in
             let type: String
             let contentTypeEscaped = (r.attributes.headers?.contentType ?? "").replacingOccurrences(of: "/", with: "_")
@@ -220,7 +218,7 @@ extension TransitionElement: SwiftConvertible {
             "publicMemberwiseInit": `public`,
             "name": requestTypeName,
             "responseCases": responseCases,
-            "method": "." + request.attributes.method.rawValue.lowercased(),
+            "method": "." + request.attributes.method.content.rawValue.lowercased(),
             "path": href
         ]
         if let hrefVariables = attributes?.hrefVariables {
@@ -274,10 +272,10 @@ extension TransitionElement: SwiftConvertible {
 
 
     func swiftRequestTypeName(request: HTTPRequestElement, resource: ResourceElement) throws -> String {
-        if let title = meta?.title, let first = title.first {
+        if let title = meta?.title?.content, let first = title.first {
             return (String(first).uppercased() + String(title.dropFirst())).swiftIdentifierized()
         } else {
-            return (request.attributes.method.rawValue + "_" + resource.href(transition: self, request: request)).swiftIdentifierized()
+            return (request.attributes.method.content.rawValue + "_" + resource.href(transition: self, request: request)).swiftIdentifierized()
         }
     }
 }
@@ -301,7 +299,7 @@ extension MemberElement {
         }
         return name + (required ? "" : "?")
     }
-    var swiftDoc: String {return [meta?.description, content.displayValue.map {" ex. " + $0}]
+    var swiftDoc: String {return [meta?.description?.content, content.displayValue.map {" ex. " + $0}]
         .compactMap {$0}
         .joined(separator: " ")
         .docCommentPrefixed()}
@@ -322,7 +320,8 @@ extension MemberElement {
         return MemberElement(
             element: element,
             meta: meta,
-            attributes: Attributes(typeAttributes: attributes?.typeAttributes?.filter {$0 != "required"}),
+            attributes: Attributes(typeAttributes: attributes?.typeAttributes.map {
+                ArrayElement<StringElement>(element: ArrayElement<StringElement>.elementName, content: $0.content.filter {$0.content != "required"})}),
             content: .init(
                 key: content.key,
                 value: .indirect(exactType)))

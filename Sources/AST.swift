@@ -2,23 +2,25 @@ import Foundation
 
 enum APIElements {
     struct Meta: Codable, Equatable {
-        var id: String?
-        var ref: String?
-        var classes: [String]?
-        var title: String?
-        var description: String?
+        var id: StringElement?
+        var ref: StringElement?
+        var classes: ArrayElement<StringElement>?
+        var title: StringElement?
+        var description: StringElement?
+
+        var classeNames: [String] {(classes?.content ?? []).compactMap {$0.content}}
 
         init(id: String? = nil, ref: String? = nil, classes: [String]? = nil, title: String? = nil, description: String? = nil) {
-            self.id = id
-            self.ref = ref
-            self.classes = classes
-            self.title = title
-            self.description = description
+            self.id = id.map {StringElement(element: StringElement.elementName, content: $0)}
+            self.ref = ref.map {StringElement(element: StringElement.elementName, content: $0)}
+            self.classes = ArrayElement<StringElement>(element: ArrayElement<StringElement>.elementName, content: (classes ?? []).map {StringElement(element: StringElement.elementName, content: $0)})
+            self.title = title.map {StringElement(element: StringElement.elementName, content: $0)}
+            self.description = description.map {StringElement(element: StringElement.elementName, content: $0)}
         }
     }
 
     struct Attributes: Codable, Equatable {
-        var meta: [Meta]?
+        var meta: ArrayElement<Meta>?
     }
 }
 
@@ -120,6 +122,13 @@ struct APICategoryElement: TypedElement, Equatable {
         }
     }
 
+    var resources: [ResourceElement] {
+        resourceGroups.flatMap {$0.resources} + content.compactMap {
+            guard case let .resource(x) = $0 else { return nil }
+            return x
+        }
+    }
+
     var dataStructures: [DataStructureElement] {
         content.compactMap { content -> DataStructuresCategoryElement? in
             guard case let .dataStructures(x) = content else { return nil }
@@ -132,6 +141,7 @@ struct APICategoryElement: TypedElement, Equatable {
     enum Content: Codable, Equatable {
         case copy(CopyElement)
         case resourceGroup(ResourceGroupCategoryElement)
+        case resource(ResourceElement)
         case dataStructures(DataStructuresCategoryElement)
 
         enum CodingKeys: String, CodingKey {
@@ -144,9 +154,11 @@ struct APICategoryElement: TypedElement, Equatable {
             switch element {
             case CopyElement.elementName:
                 self = .copy(try CopyElement(from: decoder))
+            case ResourceElement.elementName:
+                self = .resource(try ResourceElement(from: decoder))
             case CategoryElement.elementName:
                 let category = try CategoryElement(from: decoder)
-                let classes = category.meta?.classes ?? []
+                let classes = category.meta?.classeNames ?? []
 
                 if classes.contains(ResourceGroupCategoryElement.className) {
                     self = .resourceGroup(try ResourceGroupCategoryElement(from: decoder))
@@ -163,6 +175,7 @@ struct APICategoryElement: TypedElement, Equatable {
         func encode(to encoder: Encoder) throws {
             switch self {
             case .copy(let e): try e.encode(to: encoder)
+            case .resource(let e): try e.encode(to: encoder)
             case .resourceGroup(let e): try e.encode(to: encoder)
             case .dataStructures(let e): try e.encode(to: encoder)
             }
@@ -171,6 +184,7 @@ struct APICategoryElement: TypedElement, Equatable {
         var element: String {
             switch self {
             case .copy(let e): return e.element
+            case .resource(let e): return e.element
             case .resourceGroup(let e): return e.element
             case .dataStructures(let e): return e.element
             }
@@ -182,7 +196,7 @@ struct APICategoryElement: TypedElement, Equatable {
         self.element = try container.decode(String.self, forKey: .element)
         guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
         self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
-        guard (self.meta?.classes ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classes ?? [])")) }
+        guard (self.meta?.classeNames ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classeNames ?? [])")) }
         self.attributes = try container.decodeIfPresent(APIElements.Attributes.self, forKey: .attributes)
         self.content = try container.decode([Content].self, forKey: .content)
     }
@@ -237,7 +251,7 @@ struct ResourceGroupCategoryElement: TypedElement {
         self.element = try container.decode(String.self, forKey: .element)
         guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
         self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
-        guard (self.meta?.classes ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classes ?? [])")) }
+        guard (self.meta?.classeNames ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classeNames ?? [])")) }
         self.attributes = try container.decodeIfPresent(APIElements.Attributes.self, forKey: .attributes)
         self.content = try container.decode([Content].self, forKey: .content)
     }
@@ -256,7 +270,7 @@ struct DataStructuresCategoryElement: TypedElement {
         self.element = try container.decode(String.self, forKey: .element)
         guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
         self.meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
-        guard (self.meta?.classes ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classes ?? [])")) }
+        guard (self.meta?.classeNames ?? []).contains(Self.className) else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.meta], debugDescription: "meta classes is expected to have \(Self.className) but found: \(self.meta?.classeNames ?? [])")) }
         self.attributes = try container.decodeIfPresent(APIElements.Attributes.self, forKey: .attributes)
         self.content = try container.decode([DataStructureElement].self, forKey: .content)
     }
@@ -293,7 +307,7 @@ struct DataStructureElement: TypedElement {
             case element, meta, content
         }
 
-        private struct ArrayContent: Codable {
+        private struct ArrayContent: Codable, Equatable {
             var element: String
         }
 
@@ -301,7 +315,7 @@ struct DataStructureElement: TypedElement {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             let element = try container.decode(String.self, forKey: .element)
             let meta = try container.decodeIfPresent(APIElements.Meta.self, forKey: .meta)
-            if let id = meta?.id {
+            if let id = meta?.id?.content {
                 if element == "array" {
                     let content = try container.decode([ArrayContent].self, forKey: .content)
                     guard content.count == 1, let ref = content.first?.element else {
@@ -344,11 +358,7 @@ struct DataStructureElement: TypedElement {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.element = try container.decode(String.self, forKey: .element)
         guard self.element == Self.elementName else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.element], debugDescription: "element \(Self.elementName) is expected but found: \(self.element)")) }
-        let contents = try container.decode([Content].self, forKey: .content)
-        guard contents.count == 1, let content = contents.first else {
-            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: container.codingPath + [CodingKeys.content], debugDescription: "unexpected single array content: \(contents)"))
-        }
-        self.content = content
+        self.content = try container.decode(Content.self, forKey: .content)
     }
 }
 
@@ -360,14 +370,14 @@ struct MemberElement: TypedElement {
     var content: Content
 
     var description: String? {
-        meta?.description
+        meta?.description?.content
     }
 
     var name: String {content.key.content}
-    var required: Bool {attributes?.typeAttributes?.contains("required") == true}
+    var required: Bool {attributes?.typeAttributes?.content.map {$0.content}.contains("required") == true}
 
     struct Attributes: Codable, Equatable {
-        var typeAttributes: [String]?
+        var typeAttributes: ArrayElement<StringElement>?
     }
 
     struct Content: Codable, Equatable {
@@ -463,6 +473,12 @@ struct NumberElement: SimpleTypedElement {
     var content: Int // should capable Int or Double
 }
 
+struct ArrayElement<T: Codable & Equatable>: SimpleTypedElement {
+    static var elementName: String {"array"}
+    var element: String
+    var content: [T]
+}
+
 struct CopyElement: SimpleTypedElement {
     static var elementName = "copy"
     var element: String
@@ -498,7 +514,7 @@ struct ResourceElement: TypedElement {
     }
 
     struct Attributes: Codable, Equatable {
-        var href: String
+        var href: StringElement
     }
 
     enum Content: Codable, Equatable {
@@ -545,7 +561,7 @@ struct ResourceElement: TypedElement {
 }
 extension ResourceElement {
     func href(transition: TransitionElement, request: HTTPRequestElement) -> String {
-        request.attributes.href ?? transition.attributes?.href ?? attributes.href
+        request.attributes.href?.content ?? transition.attributes?.href?.content ?? attributes.href.content
     }
 }
 
@@ -571,7 +587,7 @@ struct TransitionElement: TypedElement {
     }
 
     struct Attributes: Codable, Equatable {
-        var href: String?
+        var href: StringElement?
         var hrefVariables: HrefVariables?
         struct HrefVariables: SimpleTypedElement {
             static let elementName = "hrefVariables"
@@ -672,15 +688,20 @@ struct HTTPRequestElement: TypedElement {
     }
 
     struct Attributes: Codable, Equatable {
-        var method: Method
-        var href: String? // nil indicates transition.href should be used
+        var method: MethodElement
+        var href: StringElement? // nil indicates transition.href should be used
         var headers: HTTPHeadersElement?
-        enum Method: String, Codable, Equatable {
-            case GET
-            case POST
-            case PUT
-            case DELETE
-            case PATCH
+        struct MethodElement: SimpleTypedElement {
+            static let elementName = "string"
+            var element: String
+            var content: Method
+            enum Method: String, Codable, Equatable {
+                case GET
+                case POST
+                case PUT
+                case DELETE
+                case PATCH
+            }
         }
     }
 
@@ -729,9 +750,15 @@ struct HTTPResponseElement: TypedElement {
         var statusCode: Int
         var headers: HTTPHeadersElement?
 
+        struct StatusCodeElement: SimpleTypedElement {
+            static let elementName = "string"
+            var element: String
+            var content: String
+        }
+
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            guard let statusCode = Int(try container.decode(String.self, forKey: .statusCode)) else {
+            guard let statusCode = Int(try container.decode(StatusCodeElement.self, forKey: .statusCode).content) else {
                 throw DecodingError.typeMismatch(Int.self, DecodingError.Context(codingPath: container.codingPath + [CodingKeys.statusCode], debugDescription: "statusCode is expected a String representing an Int"))
             }
             self.statusCode = statusCode
@@ -796,6 +823,6 @@ struct AssetElement: TypedElement {
     var content: String
 
     struct Attributes: Codable, Equatable {
-        var contentType: String?
+        var contentType: StringElement?
     }
 }
