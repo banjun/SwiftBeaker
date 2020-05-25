@@ -1,3 +1,6 @@
+![CI](https://github.com/banjun/SwiftBeaker/workflows/CI/badge.svg)
+[![Build Status](https://app.bitrise.io/app/9ad8bb7ebc1fcbad/status.svg?token=6YtIRLZAuCDIi5bkYjXqXg)](https://app.bitrise.io/app/9ad8bb7ebc1fcbad)
+
 SwiftBeaker
 ===========
 
