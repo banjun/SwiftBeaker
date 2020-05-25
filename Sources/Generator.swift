@@ -68,14 +68,12 @@ extension DataStructureElement.Content: SwiftConvertible {
             .map {try $0.memberAvoidingSwiftRecursiveStruct(parentTypes: [name])}
             .map { m in
                 let optional = !m.required
-                let optionalSuffix = optional ? "?" : ""
 
                 return [
                     "name": m.swiftName,
                     "type": m.swiftType,
                     "optional": optional,
-                    "doc": m.swiftDoc,
-                    "decoder": (m.content.value.isArray ? "<||" : "<|") + optionalSuffix]}
+                    "doc": m.swiftDoc]}
 
         let localName = name.components(separatedBy: ".").last ?? name
         return (local: try localDSTemplate.render(["public": `public` ? "public " : "",
