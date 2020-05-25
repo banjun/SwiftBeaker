@@ -1,0 +1,17 @@
+class NotarizeCLIAction < Fastlane::Actions::NotarizeAction
+  def self.stape
+  end
+end
+
+default_platform(:mac)
+
+platform :mac do
+  lane :archive do
+    spm(configuration: 'release', build_path: '.build')
+    app = '.build/release/SwiftBeaker'
+    zipped = Pathname(app).sub_ext(".zip").to_s
+    sh("codesign -f -s 'Developer ID' --options runtime --timestamp ../#{app}")
+    zip(path: app, output_path: zipped)
+    notarize_cli(package: zipped, bundle_id: 'jp.banjun.SwiftBeaker', print_log: true, verbose: true)
+  end
+end

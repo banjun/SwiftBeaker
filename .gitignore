@@ -27,3 +27,5 @@ xcuserdata/
 
 ## swift package generate-xcodeproj
 /*.xcodeproj/
+
+/fastlane/report.xml
