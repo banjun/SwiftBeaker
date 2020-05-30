@@ -21,6 +21,11 @@ or alternatively using `brew cask install fastlane`
 fastlane mac archive
 ```
 
+### mac notarized_archive
+```
+fastlane mac notarized_archive
+```
+
 
 ----
 
