@@ -6,12 +6,23 @@ end
 default_platform(:mac)
 
 platform :mac do
-  lane :archive do
+  lane :archive do |options|
     spm(configuration: 'release', build_path: '.build')
     app = '.build/release/SwiftBeaker'
     zipped = Pathname(app).sub_ext(".zip").to_s
-    sh("codesign -f -s 'Developer ID' --options runtime --timestamp ../#{app}")
+    sh("codesign -f -s 'Developer ID' --options runtime --timestamp ../#{app}") if options[:codesign]
     zip(path: app, output_path: zipped)
+  end
+  
+  lane :notarized_archive do
+    match(
+      git_url: ENV["MATCH_GIT_URL"],
+      app_identifier: ENV["MATCH_APP_IDENTIFIER"],
+      platform: 'macos',
+      type: 'developer_id',
+      skip_provisioning_profiles: true,
+      readonly: true)
+    zipped = archive(codesign: true)
     notarize_cli(package: zipped, bundle_id: 'jp.banjun.SwiftBeaker', print_log: true, verbose: true)
   end
 end
